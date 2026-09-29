@@ -1,0 +1,4 @@
+Ru:
+  когда загрузилось пишите doelzaberi-install и там короче откроется
+Eng:
+  once it's loaded type doelzaberi-install and it'll open from there
