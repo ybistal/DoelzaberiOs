@@ -1,0 +1,14 @@
+CMake 4 removed the OLD behavior of CMP0037, so the alias target "test"
+cannot be defined there anymore.
+
+--- a/cmake/Tests.cmake
++++ b/cmake/Tests.cmake
+@@ -44,7 +44,7 @@
+ # If CMP0037 is available, also make an alias "test" target.
+ # Note that this policy may not be available, in which case definining such a target silently fails.
+ cmake_policy(PUSH)
+-if(POLICY CMP0037)
++if(POLICY CMP0037 AND NOT CMAKE_VERSION VERSION_GREATER_EQUAL 4.0)
+   cmake_policy(SET CMP0037 OLD)
+   add_custom_target(test DEPENDS fish_run_tests)
+ endif()

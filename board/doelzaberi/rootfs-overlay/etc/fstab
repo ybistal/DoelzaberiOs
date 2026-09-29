@@ -1,0 +1,4 @@
+tmpfs		/tmp		tmpfs	mode=1777	0	0
+tmpfs		/run		tmpfs	mode=0755,nosuid,nodev	0	0
+proc		/proc		proc	noexec,nosuid,nodev	0	0
+efivarfs	/sys/firmware/efi/efivars	efivarfs	defaults	0	0

@@ -1,0 +1,15 @@
+config BR2_PACKAGE_FISH
+	bool "fish"
+	depends on BR2_INSTALL_LIBSTDCPP
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on BR2_USE_MMU # fork()
+	depends on BR2_USE_WCHAR
+	select BR2_PACKAGE_NCURSES
+	select BR2_PACKAGE_NCURSES_WCHAR
+	select BR2_PACKAGE_PCRE2
+	select BR2_PACKAGE_PCRE2_32
+	help
+	  fish is a smart and user-friendly command line shell for Linux and
+	  other Unix-like operating systems.
+
+	  https://fishshell.com/

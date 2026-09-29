@@ -1,0 +1,1147 @@
+#!/bin/sh
+
+set -u
+
+PROG=${0##*/}
+ESP_SIZE=256M
+ROOT_SIZE=
+MIN_DISK_SIZE=2147483648
+ESP_LABEL=EFI
+BTRFS_LABEL=doelzaberi
+WORKDIR=/run/doelzaberi-install
+GRUB_DIR=/usr/lib/grub/x86_64-efi
+GRUB_MODULES="boot linux btrfs ext2 fat iso9660 search search_fs_file search_fs_uuid part_gpt part_msdos normal efi_gop efi_uga test echo"
+NEEDED_TOOLS="sgdisk mkfs.vfat mkfs.btrfs grub-mkimage tar awk install mount umount sync chown chmod mkpasswd od cut stty"
+
+RUNTIME_DIRS="/dev /proc /sys /run /tmp /mnt /media"
+RUNTIME_SUBDIRS="/dev/pts /dev/shm /run/lock /run/lock/subsys"
+
+ASSUME_YES=no
+LIST_ONLY=no
+DRY_RUN=no
+FORCE=no
+WITH_INITRD=yes
+WITH_NVRAM=yes
+CREATE_USER=ask
+DEFAULT_USER=doelzaberi
+USER_NAME=
+USER_PASSWORD=
+USER_FULLNAME=
+USER_SHELL=/usr/bin/fish
+USER_GROUPS="wheel video audio input seat"
+SECRET=
+DEVICE=
+SOURCE=
+SOURCE_DEVICE=
+LIVE_DEVICE=
+LIVE_DISK=
+ESP_PART=
+ROOT_PART=
+ROOT_PARAM=
+DISK_NAME=
+DISK_SECTORS=
+DISK_HUMAN=
+DISK_MODEL=
+STEP=0
+STEPS=12
+
+say()
+{
+	printf '%s\n' "$*"
+}
+
+rule()
+{
+	printf '%s\n' '--------------------------------------------------------------------------'
+}
+
+step()
+{
+	STEP=$((STEP + 1))
+	printf '\n[%s/%s] %s\n' "$STEP" "$STEPS" "$*"
+}
+
+note()
+{
+	printf '       %s\n' "$*"
+}
+
+warn()
+{
+	printf '%s: warning: %s\n' "$PROG" "$*" >&2
+}
+
+die()
+{
+	printf '\n%s: error: %s\n' "$PROG" "$*" >&2
+	exit 1
+}
+
+human_size()
+{
+	awk -v s="$1" 'BEGIN {
+		n = split("B KiB MiB GiB TiB PiB", unit, " ")
+		i = 1
+		while (s >= 1024 && i < n) {
+			s = s / 1024
+			i = i + 1
+		}
+		if (i == 1) {
+			printf "%d %s", s, unit[i]
+		} else {
+			printf "%.1f %s", s, unit[i]
+		}
+	}'
+}
+
+human_sectors()
+{
+	if [ -z "${1:-}" ]; then
+		printf '?'
+		return 0
+	fi
+	human_size $(( $1 * 512 ))
+}
+
+sys_value()
+{
+	cat "/sys/class/block/$1/$2" 2>/dev/null | tr -d '\n'
+}
+
+disk_sectors()
+{
+	sys_value "$1" size
+}
+
+parent_disk()
+{
+	if [ -e "/sys/class/block/$1/partition" ]; then
+		_path=$(readlink -f "/sys/class/block/$1" 2>/dev/null || true)
+		if [ -n "$_path" ]; then
+			_dir=${_path%/*}
+			printf '%s' "${_dir##*/}"
+		fi
+	else
+		printf '%s' "$1"
+	fi
+}
+
+part_node()
+{
+	case "$1" in
+		*[0-9]) printf '%sp%s' "$1" "$2" ;;
+		*)      printf '%s%s'  "$1" "$2" ;;
+	esac
+}
+
+disk_kind()
+{
+	_path=$(readlink -f "/sys/class/block/$1" 2>/dev/null || true)
+	case "$_path" in
+		*/usb*)    _kind=usb ;;
+		*/nvme*)   _kind=nvme ;;
+		*/mmc*)    _kind=mmc ;;
+		*/virtio*) _kind=virtio ;;
+		*)         _kind= ;;
+	esac
+	if [ -z "$_kind" ]; then
+		case "$1" in
+			nvme*)    _kind=nvme ;;
+			mmcblk*)  _kind=mmc ;;
+			vd*|xvd*) _kind=virtio ;;
+			hd*)      _kind=ata ;;
+			sd*)      _kind=sata/scsi ;;
+			*)        _kind=disk ;;
+		esac
+	fi
+	[ "$(sys_value "$1" removable)" = "1" ] && _kind="$_kind, removable"
+	printf '%s' "$_kind"
+}
+
+disk_model()
+{
+	_vendor=$(sys_value "$1" device/vendor)
+	_model=$(sys_value "$1" device/model)
+	printf '%s' "$(printf '%s %s' "$_vendor" "$_model" | tr -s ' ' | sed -e 's/^ //' -e 's/ $//')"
+}
+
+
+valid_user_name()
+{
+	case "$1" in
+	'' | -* | [0-9]* | *[!a-z0-9_-]*) return 1 ;;
+	*) return 0 ;;
+	esac
+}
+
+read_secret()
+{
+	SECRET=
+	if stty -echo 2>/dev/null; then
+		IFS= read -r SECRET || SECRET=
+		stty echo 2>/dev/null
+	else
+		warn 'cannot switch off the echo of the terminal, the password stays visible'
+		IFS= read -r SECRET || SECRET=
+	fi
+	printf '\n'
+}
+
+random_salt()
+{
+	_salt=$(od -An -tx1 -N8 /dev/urandom 2>/dev/null | tr -d ' \n')
+	[ -n "$_salt" ] || _salt=0123456789abcdef
+	printf '%s' "$_salt" | cut -c1-16
+}
+
+next_free_id()
+{
+	awk -F: -v min="$2" '
+		$3 ~ /^[0-9]+$/ && $3 >= min && $3 < 60000 { used[$3] = 1 }
+		END {
+			for (i = min; i < 60000; i++)
+				if (!(i in used)) { print i; exit }
+		}' "$1"
+}
+
+ensure_group()
+{
+	_eg_file=$1
+	_eg_name=$2
+	if awk -F: -v g="$_eg_name" '$1 == g { found = 1 } END { exit !found }' "$_eg_file"; then
+		return 0
+	fi
+	_eg_gid=$(next_free_id "$_eg_file" 1000)
+	[ -n "$_eg_gid" ] || return 1
+	printf '%s:x:%s:\n' "$_eg_name" "$_eg_gid" >> "$_eg_file"
+	[ -f "$WORKDIR/root/etc/gshadow" ] &&
+		printf '%s:!::\n' "$_eg_name" >> "$WORKDIR/root/etc/gshadow"
+	note "group $_eg_name created with gid $_eg_gid"
+	return 0
+}
+
+add_group_member()
+{
+	_agm_file=$1
+	_agm_group=$2
+	_agm_member=$3
+	awk -F: -v OFS=: -v g="$_agm_group" -v u="$_agm_member" '
+		$1 == g {
+			found = 1
+			n = split($4, m, ",")
+			for (i = 1; i <= n; i++)
+				if (m[i] == u) present = 1
+			if (!present) {
+				if ($4 == "") $4 = u
+				else $4 = $4 "," u
+			}
+		}
+		{ print }
+		END { exit !found }' "$_agm_file" > "$_agm_file.new" || {
+		rm -f "$_agm_file.new"
+		return 1
+	}
+	mv "$_agm_file.new" "$_agm_file"
+	return 0
+}
+
+set_shadow_entry()
+{
+	_sse_file=$1
+	_sse_user=$2
+	_sse_hash=$3
+	_sse_days=$4
+	awk -F: -v OFS=: -v u="$_sse_user" -v h="$_sse_hash" -v d="$_sse_days" '
+		$1 == u { found = 1; $2 = h; $3 = d; $4 = 0; $5 = 99999; $6 = 7; $7 = "" }
+		{ print }
+		END { if (!found) print u ":" h ":" d ":0:99999:7:::" }' "$_sse_file" > "$_sse_file.new" || {
+		rm -f "$_sse_file.new"
+		return 1
+	}
+	mv "$_sse_file.new" "$_sse_file"
+	chmod 0600 "$_sse_file"
+	return 0
+}
+
+usage()
+{
+	cat <<EOF
+$PROG - install DoelzaberiOS on a disk from this running system
+
+Usage:
+  $PROG                 choose the disk from a menu (recommended)
+  $PROG --list          show the available disks, then exit
+  $PROG [options] DISK  install on DISK, for example: $PROG /dev/nvme0n1
+
+Everything that is on DISK is erased. The disk gets two partitions:
+
+  partition 1  $ESP_SIZE    FAT32   LABEL=$ESP_LABEL           GRUB EFI bootloader and the kernel
+  partition 2  the rest   btrfs   LABEL=$BTRFS_LABEL   a copy of this running system
+
+Options:
+  -l, --list           show the disks with size, bus and model, then exit
+  -y, --yes            do not ask for the confirmation
+  -n, --dry-run        print the plan and exit without writing anything
+      --esp-size SIZE  size of the EFI partition (default: $ESP_SIZE, also 512M, 1G, ...)
+      --root-size SIZE size of the root partition (default: all remaining space)
+      --source DIR     directory with boot/bzImage and boot/initrd
+                       (default: the medium this system was booted from)
+      --no-initrd      do not install the initrd, so there is no "live, RAM" entry
+      --no-nvram       do not add a UEFI boot entry to the firmware
+      --force          continue when the disk is in use or is the live medium
+  -u, --user NAME      name of the account to create in the new system
+                       (default: ask, $DEFAULT_USER is offered)
+  -p, --password PASS   password for that account (default: ask)
+      --full-name NAME  full name of the account
+      --shell PATH      login shell of the account (default: $USER_SHELL)
+      --no-user         do not create an account at all
+  -h, --help           show this help
+
+Examples:
+  $PROG --list
+  $PROG
+  $PROG --dry-run /dev/nvme0n1
+  $PROG -y /dev/sda
+  $PROG --user anna -y /dev/sda
+  $PROG --user anna --password geheim --shell /bin/bash /dev/sda
+EOF
+}
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-l|--list)     LIST_ONLY=yes ;;
+		-y|--yes)      ASSUME_YES=yes ;;
+		-n|--dry-run)  DRY_RUN=yes ;;
+		--force)       FORCE=yes ;;
+		--no-user)     CREATE_USER=no ;;
+		-u|--user)     [ $# -ge 2 ] || die '--user needs a name'
+		               CREATE_USER=yes; USER_NAME=$2; shift ;;
+		--user=*)      CREATE_USER=yes; USER_NAME=${1#*=} ;;
+		-p|--password) [ $# -ge 2 ] || die '--password needs a password'
+		               USER_PASSWORD=$2; shift ;;
+		--password=*)  USER_PASSWORD=${1#*=} ;;
+		--full-name)   [ $# -ge 2 ] || die '--full-name needs a value'
+		               USER_FULLNAME=$2; shift ;;
+		--full-name=*) USER_FULLNAME=${1#*=} ;;
+		--shell)       [ $# -ge 2 ] || die '--shell needs a path'
+		               USER_SHELL=$2; shift ;;
+		--shell=*)     USER_SHELL=${1#*=} ;;
+		--no-initrd)   WITH_INITRD=no ;;
+		--no-nvram)    WITH_NVRAM=no ;;
+		-h|--help)     usage; exit 0 ;;
+		--source)      [ $# -ge 2 ] || die '--source needs a directory'
+		               SOURCE=$2; shift ;;
+		--source=*)    SOURCE=${1#*=} ;;
+		--esp-size)    [ $# -ge 2 ] || die '--esp-size needs a size'
+		               ESP_SIZE=$2; shift ;;
+		--esp-size=*)  ESP_SIZE=${1#*=} ;;
+		--root-size)   [ $# -ge 2 ] || die '--root-size needs a size'
+		               ROOT_SIZE=$2; shift ;;
+		--root-size=*) ROOT_SIZE=${1#*=} ;;
+		-*)            usage >&2; die "unknown option: $1" ;;
+		*)             [ -z "$DEVICE" ] || die 'only one disk can be given'
+		               DEVICE=$1 ;;
+	esac
+	shift
+done
+
+ask_password()
+{
+	_tries=0
+	while [ "$_tries" -lt 3 ]; do
+		printf 'Password for %s: ' "$USER_NAME"
+		read_secret
+		_p1=$SECRET
+		printf 'Repeat the password: '
+		read_secret
+		_p2=$SECRET
+		if [ -z "$_p1" ]; then
+			warn 'the password cannot be empty'
+		elif [ "$_p1" != "$_p2" ]; then
+			warn 'the passwords do not match'
+		else
+			USER_PASSWORD=$_p1
+			return 0
+		fi
+		_tries=$((_tries + 1))
+	done
+	die 'cannot read a password (three attempts)'
+}
+
+ask_account()
+{
+	if [ "$CREATE_USER" = "no" ]; then
+		note 'no account is created, only root can log in'
+		return 0
+	fi
+
+	if [ ! -t 0 ]; then
+		if [ "$CREATE_USER" = "yes" ] && [ -n "$USER_NAME" ] && [ -n "$USER_PASSWORD" ]; then
+			return 0
+		fi
+		warn 'stdin is not a terminal, no account is created:'
+		warn 'use --user NAME --password PASS to create one'
+		CREATE_USER=no
+		return 0
+	fi
+
+	say ''
+	rule
+	say 'The account for the installed system'
+	say ''
+	say 'It is created in the copy of this system, in the wheel group (so that'
+	say 'doas(1) works) and in the video, audio, input and seat groups (so that'
+	say 'the Wayland session, "doelzaberi-gui", can use the graphics card).'
+	rule
+
+	if [ "$CREATE_USER" = "ask" ]; then
+		printf 'User name [%s] (empty: no new account): ' "$DEFAULT_USER"
+		IFS= read -r _answer || _answer=
+		if [ -z "$_answer" ]; then
+			warn 'no account will be created'
+			CREATE_USER=no
+			return 0
+		fi
+		USER_NAME=$(printf '%s' "$_answer" | tr 'A-Z' 'a-z')
+	fi
+
+	if ! valid_user_name "$USER_NAME"; then
+		die "'$USER_NAME' is not a valid user name (a-z, 0-9, _ and -, no leading digit)"
+	fi
+	CREATE_USER=yes
+	if [ -z "$USER_FULLNAME" ]; then
+		USER_FULLNAME=$(printf '%s%s' \
+			"$(printf '%s' "$USER_NAME" | cut -c1 | tr 'a-z' 'A-Z')" \
+			"$(printf '%s' "$USER_NAME" | cut -c2-)")
+	fi
+
+	if [ -z "$USER_PASSWORD" ]; then
+		ask_password
+	fi
+	if [ -z "$USER_PASSWORD" ]; then
+		die 'the password of the account cannot be empty'
+	fi
+
+	say ''
+	note "user    $USER_NAME ($USER_FULLNAME)"
+	note "home    /home/$USER_NAME, from /etc/skel"
+	note "shell   $USER_SHELL"
+	note "groups  $USER_GROUPS (the ones that exist)"
+}
+
+candidate_disks()
+{
+	for _node in /sys/class/block/*; do
+		[ -e "$_node" ] || continue
+		_name=${_node##*/}
+		case "$_name" in
+			loop*|ram*|zram*|dm-*|md*|sr*|fd*|nbd*|mtdblock*) continue ;;
+			mmcblk*boot*|mmcblk*rpmb*) continue ;;
+		esac
+		[ -e "/sys/class/block/$_name/partition" ] && continue
+		_size=$(disk_sectors "$_name")
+		[ -n "$_size" ] || continue
+		[ "$_size" -gt 0 ] 2>/dev/null || continue
+		printf '%s\n' "$_name"
+	done
+}
+
+partitions_of()
+{
+	for _node in /sys/class/block/*; do
+		[ -e "$_node" ] || continue
+		_name=${_node##*/}
+		[ -e "/sys/class/block/$_name/partition" ] || continue
+		[ "$(parent_disk "$_name")" = "$1" ] || continue
+		printf '%s\n' "$_name"
+	done
+}
+
+disk_mounts()
+{
+	while read -r _dev _mp _rest; do
+		case "$_dev" in
+			/dev/*) ;;
+			*) continue ;;
+		esac
+		[ "$(parent_disk "${_dev#/dev/}")" = "$1" ] || continue
+		printf '       %s is mounted on %s\n' "$_dev" "$_mp"
+	done < /proc/mounts
+}
+
+disk_in_use()
+{
+	[ -n "$(disk_mounts "$1")" ]
+}
+
+mount_readonly()
+{
+	if command -v timeout >/dev/null 2>&1; then
+		timeout 10 mount -o ro "$1" "$2" 2>/dev/null
+	else
+		mount -o ro "$1" "$2" 2>/dev/null
+	fi
+}
+
+probe_medium()
+{
+	if [ -n "$LIVE_DEVICE" ]; then
+		printf '%s' "$LIVE_DEVICE"
+		return 0
+	fi
+	mkdir -p "$WORKDIR/probe" 2>/dev/null || return 1
+	for _dev in /dev/*; do
+		[ -b "$_dev" ] || continue
+		case "$_dev" in
+			/dev/loop*|/dev/ram*|/dev/zram*|/dev/dm-*|/dev/md*) continue ;;
+		esac
+		if [ -n "$DISK_NAME" ]; then
+			[ "$_dev" = "/dev/$DISK_NAME" ] && continue
+			[ "$(parent_disk "${_dev#/dev/}")" = "$DISK_NAME" ] && continue
+		fi
+		mount_readonly "$_dev" "$WORKDIR/probe" || continue
+		if [ -f "$WORKDIR/probe/boot/bzImage" ]; then
+			LIVE_DEVICE=$_dev
+			umount "$WORKDIR/probe" 2>/dev/null
+			printf '%s' "$_dev"
+			return 0
+		fi
+		umount "$WORKDIR/probe" 2>/dev/null
+	done
+	return 1
+}
+
+probe_live_medium()
+{
+	probe_medium >/dev/null 2>&1 || true
+	if [ -n "$LIVE_DEVICE" ]; then
+		LIVE_DISK=$(parent_disk "${LIVE_DEVICE#/dev/}")
+	fi
+}
+
+print_disk_table()
+{
+	_index=0
+	say ''
+	printf '  %-3s %-16s %10s  %-10s %s\n' '#' 'DEVICE' 'SIZE' 'BUS' 'MODEL'
+	rule
+	for _disk in $(candidate_disks); do
+		_index=$((_index + 1))
+		_marks=
+		[ "$_disk" = "$LIVE_DISK" ] && _marks="$_marks [live medium]"
+		disk_in_use "$_disk" && _marks="$_marks [in use]"
+		if [ "$(disk_sectors "$_disk")" -lt $((MIN_DISK_SIZE / 512)) ] 2>/dev/null; then
+			_marks="$_marks [too small]"
+		fi
+		printf '  %-3s %-16s %10s  %-10s %s%s\n' \
+			"$_index" "/dev/$_disk" "$(human_sectors "$(disk_sectors "$_disk")")" \
+			"$(disk_kind "$_disk")" "$(disk_model "$_disk")" "$_marks"
+	done
+	if [ "$_index" = "0" ]; then
+		say '  no disks found'
+		say ''
+		say 'A disk can be missing for three reasons: it is not connected, the'
+		say 'firmware hides it (an enabled Intel VMD/RST/RAID setting hides NVMe'
+		say 'disks from every operating system), or the kernel has no driver for'
+		say 'it.  "dmesg | grep -i -e nvme -e mmc -e ata -e usb-storage" shows'
+		say 'which of the three it is.'
+	fi
+	rule
+}
+
+list_disks()
+{
+	if [ "$(id -u)" = "0" ]; then
+		probe_live_medium
+	fi
+	print_disk_table
+	say ''
+	say "Run \"$PROG\" without arguments to choose a disk from this list."
+}
+
+choose_disk()
+{
+	while :; do
+		print_disk_table
+		printf '\nNumber of the disk to install on (q to quit): '
+		read -r _answer || _answer=q
+		case "$_answer" in
+			q|Q|quit|exit)
+				say 'Nothing was written.'
+				exit 0
+				;;
+			/dev/*)
+				if [ -b "$_answer" ]; then
+					DEVICE=$_answer
+					DISK_NAME=${_answer#/dev/}
+					return 0
+				fi
+				;;
+			*)
+				if [ -e "/sys/class/block/$_answer" ]; then
+					DEVICE="/dev/$_answer"
+					DISK_NAME=$_answer
+					return 0
+				fi
+				_index=0
+				_choice=
+				for _disk in $(candidate_disks); do
+					_index=$((_index + 1))
+					if [ "$_answer" = "$_index" ]; then
+						_choice=$_disk
+					fi
+				done
+				if [ -n "$_choice" ]; then
+					DEVICE="/dev/$_choice"
+					DISK_NAME=$_choice
+					return 0
+				fi
+				;;
+		esac
+		warn "'$_answer' is not a number from the list"
+	done
+}
+
+validate_device()
+{
+	step "Checking $DEVICE"
+
+	[ -b "$DEVICE" ] || die "$DEVICE is not a block device"
+	DISK_NAME=${DEVICE#/dev/}
+	[ -e "/sys/class/block/$DISK_NAME" ] || die "$DEVICE is not a known block device"
+	[ -e "/sys/class/block/$DISK_NAME/partition" ] && \
+		die "$DEVICE is a partition - give the whole disk, for example /dev/sda"
+
+	DISK_SECTORS=$(disk_sectors "$DISK_NAME")
+	[ -n "$DISK_SECTORS" ] || die "cannot read the size of $DEVICE"
+	[ $((DISK_SECTORS * 512)) -ge "$MIN_DISK_SIZE" ] || \
+		die "$DEVICE is only $(human_sectors "$DISK_SECTORS") - at least $(human_size "$MIN_DISK_SIZE") are needed"
+	DISK_HUMAN=$(human_sectors "$DISK_SECTORS")
+	DISK_MODEL=$(disk_model "$DISK_NAME")
+	note "$DEVICE: $DISK_HUMAN, $(disk_kind "$DISK_NAME"), ${DISK_MODEL:-unknown model}"
+
+	if disk_in_use "$DISK_NAME"; then
+		disk_mounts "$DISK_NAME" >&2
+		[ "$FORCE" = "yes" ] || die "$DEVICE is in use - unmount it first, or use --force"
+		warn "$DEVICE is in use, continuing because of --force"
+	fi
+
+	_root=$(awk '$2 == "/" && $1 ~ "^/dev/" { print $1; exit }' /proc/mounts)
+	if [ -n "$_root" ] && [ "$(parent_disk "${_root#/dev/}")" = "$DISK_NAME" ]; then
+		[ "$FORCE" = "yes" ] || die "$DEVICE carries the running system"
+	fi
+
+	probe_live_medium
+	if [ -n "$LIVE_DEVICE" ] && [ "$LIVE_DISK" = "$DISK_NAME" ]; then
+		[ "$FORCE" = "yes" ] || die "$DEVICE is the medium this system was booted from - the kernel and the initrd are on it"
+	fi
+	if [ -z "$LIVE_DEVICE" ] && [ ! -f /boot/bzImage ]; then
+		warn 'no medium with boot/bzImage found - use --source DIR to name it'
+	fi
+}
+
+confirm_device()
+{
+	if [ "$ASSUME_YES" = "yes" ]; then
+		return 0
+	fi
+	say ''
+	rule
+	say 'All data on this disk will be erased:'
+	say ''
+	say "  device  $DEVICE"
+	say "  size    $DISK_HUMAN"
+	say "  model   ${DISK_MODEL:-unknown}"
+	say "  bus     $(disk_kind "$DISK_NAME")"
+	say ''
+	if [ "$CREATE_USER" = "yes" ]; then
+		say "New layout (and the account $USER_NAME):"
+	else
+		say 'New layout:'
+	fi
+	say "  $ESP_LABEL         ${ESP_SIZE}      FAT32   GRUB EFI bootloader, kernel, initrd"
+	say "  $BTRFS_LABEL   ${ROOT_SIZE:-all remaining space}   btrfs   this system, as the new root filesystem"
+	rule
+	printf 'Type the disk name to confirm (%s): ' "$DISK_NAME"
+	read -r _answer || _answer=
+	say ''
+	[ "$_answer" = "$DISK_NAME" ] || die 'aborted, nothing was written'
+}
+
+reread_parttable()
+{
+	if command -v partprobe >/dev/null 2>&1; then
+		partprobe "$1" 2>/dev/null || true
+	elif command -v partx >/dev/null 2>&1; then
+		partx -u "$1" 2>/dev/null || true
+	fi
+	if command -v blockdev >/dev/null 2>&1; then
+		blockdev --rereadpt "$1" 2>/dev/null || true
+	fi
+}
+
+wait_for_node()
+{
+	_tries=0
+	while [ "$_tries" -lt 20 ]; do
+		[ -b "$1" ] && return 0
+		sleep 1
+		_tries=$((_tries + 1))
+	done
+	return 1
+}
+
+partuuid_of()
+{
+	sgdisk --info="$2" "$1" 2>/dev/null | \
+		awk -F': *' 'tolower($1) ~ /unique guid/ { print tolower($2); exit }'
+}
+
+partition_disk()
+{
+	step "Creating a new GPT on $DEVICE"
+	note 'removing the old partition table'
+	sgdisk --zap-all "$DEVICE" >/dev/null 2>&1 || die "cannot erase the partition table of $DEVICE"
+
+	dd if=/dev/zero of="$DEVICE" bs=1M count=2 conv=notrunc >/dev/null 2>&1 ||
+		warn "cannot clear the first megabytes of $DEVICE"
+
+	if [ -n "$ROOT_SIZE" ]; then
+		_second="-n 2:0:+$ROOT_SIZE"
+	else
+		_second="-n 2:0:0"
+	fi
+
+	sgdisk -a 2048 \
+		-n "1:2048:+$ESP_SIZE" -t 1:ef00 -c 1:"$ESP_LABEL" \
+		$_second -t 2:8300 -c 2:"$BTRFS_LABEL" \
+		"$DEVICE" >/dev/null 2>&1 || die "cannot create the partitions on $DEVICE"
+
+	ESP_PART=$(part_node "$DEVICE" 1)
+	ROOT_PART=$(part_node "$DEVICE" 2)
+	reread_parttable "$DEVICE"
+	wait_for_node "$ESP_PART" || die "$ESP_PART did not appear"
+	wait_for_node "$ROOT_PART" || die "$ROOT_PART did not appear"
+	note "$ESP_PART  $ESP_SIZE  FAT32  LABEL=$ESP_LABEL"
+	note "$ROOT_PART  ${ROOT_SIZE:-the remaining space}  btrfs  LABEL=$BTRFS_LABEL"
+}
+
+format_partitions()
+{
+	step 'Creating the filesystems'
+	note "mkfs.vfat -F 32 -n $ESP_LABEL $ESP_PART"
+	mkfs.vfat -F 32 -n "$ESP_LABEL" "$ESP_PART" >/dev/null || die "cannot create FAT32 on $ESP_PART"
+	note "mkfs.btrfs -f -L $BTRFS_LABEL $ROOT_PART"
+	mkfs.btrfs -f -L "$BTRFS_LABEL" "$ROOT_PART" >/dev/null || die "cannot create btrfs on $ROOT_PART"
+
+	_guid=$(partuuid_of "$DEVICE" 2)
+	if [ -n "$_guid" ]; then
+		ROOT_PARAM="PARTUUID=$_guid"
+	else
+		ROOT_PARAM="PARTLABEL=$BTRFS_LABEL"
+		warn "cannot read the partition GUID, using root=$ROOT_PARAM"
+	fi
+	note "root=$ROOT_PARAM"
+}
+
+mount_target()
+{
+	step 'Mounting the new filesystems'
+	mkdir -p "$WORKDIR/esp" "$WORKDIR/root" || die "cannot create $WORKDIR"
+	mount "$ESP_PART" "$WORKDIR/esp" || die "cannot mount $ESP_PART"
+	mount "$ROOT_PART" "$WORKDIR/root" || die "cannot mount $ROOT_PART"
+	note "$ESP_PART on $WORKDIR/esp"
+	note "$ROOT_PART on $WORKDIR/root"
+}
+
+find_source()
+{
+	step 'Looking for the kernel and the initrd to install'
+	if [ -n "$SOURCE" ]; then
+		[ -f "$SOURCE/boot/bzImage" ] || die "$SOURCE/boot/bzImage does not exist"
+		note "using $SOURCE from --source"
+	elif [ -f /boot/bzImage ]; then
+		SOURCE=/
+		note 'using /boot/bzImage of this running system'
+	elif _device=$(probe_medium); then
+		SOURCE_DEVICE=$_device
+		mkdir -p "$WORKDIR/medium" || die "cannot create $WORKDIR/medium"
+		mount -o ro "$_device" "$WORKDIR/medium" || die "cannot mount $_device read-only"
+		SOURCE=$WORKDIR/medium
+		note "$_device is the medium this system was booted from"
+	else
+		die 'cannot find boot/bzImage - mount the boot medium and use --source DIR'
+	fi
+	note "kernel   $SOURCE/boot/bzImage"
+	if [ "$WITH_INITRD" = "yes" ] && [ -f "$SOURCE/boot/initrd" ]; then
+		note "initrd   $SOURCE/boot/initrd"
+	fi
+}
+
+copy_kernel()
+{
+	step 'Copying the kernel onto the EFI partition'
+	mkdir -p "$WORKDIR/esp/boot" "$WORKDIR/esp/EFI/BOOT" || die 'cannot create the boot directories'
+	install -m 0644 "$SOURCE/boot/bzImage" "$WORKDIR/esp/boot/bzImage" || die 'cannot copy the kernel'
+	note "$ESP_PART:/boot/bzImage"
+	if [ "$WITH_INITRD" = "yes" ]; then
+		if [ -f "$SOURCE/boot/initrd" ]; then
+			install -m 0644 "$SOURCE/boot/initrd" "$WORKDIR/esp/boot/initrd" || die 'cannot copy the initrd'
+			note "$ESP_PART:/boot/initrd"
+		else
+			warn "no boot/initrd in $SOURCE - the \"live, RAM\" entry is skipped"
+			WITH_INITRD=no
+		fi
+	fi
+}
+
+tar_excludes()
+{
+	for _dir in $RUNTIME_DIRS; do
+		printf -- '--exclude=.%s --exclude=.%s/* ' "$_dir" "$_dir"
+	done
+	printf -- '--exclude=./lost+found '
+}
+
+copy_system()
+{
+	step 'Copying this running system onto the new root filesystem'
+	note 'this takes a few minutes'
+	_started=$(date +%s)
+	set -f
+	tar -C / -cpf - $(tar_excludes) . | tar -C "$WORKDIR/root" -xpf - || die 'cannot copy the system'
+	set +f
+	note "copied in $(( $(date +%s) - _started )) seconds"
+}
+
+create_account()
+{
+	if [ "$CREATE_USER" != "yes" ]; then
+		return 0
+	fi
+
+	step "Creating the account $USER_NAME in the new system"
+	_root=$WORKDIR/root
+	_passwd=$_root/etc/passwd
+	_group=$_root/etc/group
+	_shadow=$_root/etc/shadow
+
+	[ -f "$_passwd" ] || die "$_passwd is missing"
+	[ -f "$_group" ] || die "$_group is missing"
+	if [ ! -f "$_shadow" ]; then
+		warn "$_shadow is missing, creating it with locked passwords"
+		_days=$(awk 'BEGIN { printf "%d", systime() / 86400 }')
+		awk -F: -v OFS=: -v d="$_days" \
+			'{ print $1 ":*:" d ":0:99999:7:::" }' "$_passwd" > "$_shadow" ||
+			die "cannot create $_shadow"
+		chmod 0600 "$_shadow"
+	fi
+	valid_user_name "$USER_NAME" ||
+		die "'$USER_NAME' is not a valid user name"
+
+	_shell=$USER_SHELL
+	if [ ! -x "$_root$_shell" ]; then
+		warn "$_shell is not in the new system, using /bin/sh"
+		_shell=/bin/sh
+	fi
+
+	_uid=$(awk -F: -v u="$USER_NAME" '$1 == u { print $3; exit }' "$_passwd")
+	if [ -n "$_uid" ]; then
+		warn "$USER_NAME already exists in the new system (uid $_uid),"
+		warn 'only the password is changed'
+	else
+		_uid=$(next_free_id "$_passwd" 1000)
+		_gid=$(next_free_id "$_group" 1000)
+		[ -n "$_uid" ] && [ -n "$_gid" ] || die 'cannot find a free uid/gid'
+		printf '%s:x:%s:%s:%s:/home/%s:%s\n' \
+			"$USER_NAME" "$_uid" "$_gid" "$USER_FULLNAME" "$USER_NAME" "$_shell" \
+			>> "$_passwd"
+		printf '%s:x:%s:\n' "$USER_NAME" "$_gid" >> "$_group"
+		[ -f "$_root/etc/gshadow" ] &&
+			printf '%s:!::\n' "$USER_NAME" >> "$_root/etc/gshadow"
+		note "uid $_uid, gid $_gid, /etc/passwd and /etc/group updated"
+
+		_home="$_root/home/$USER_NAME"
+		mkdir -p "$_home" || die "cannot create $_home"
+		if [ -d "$_root/etc/skel" ]; then
+			( cd "$_root/etc/skel" && tar -cpf - . ) | ( cd "$_home" && tar -xpf - ) ||
+				warn 'cannot copy /etc/skel into the home directory'
+		fi
+		chown -R "$_uid:$_gid" "$_home" || die "cannot set the owner of $_home"
+		chmod 0755 "$_home"
+		note "$_home is there, the files from /etc/skel are copied"
+	fi
+
+	_days=$(awk 'BEGIN { printf "%d", systime() / 86400 }')
+	_hash=$(printf '%s' "$USER_PASSWORD" | mkpasswd -m sha256 -S "$(random_salt)" -P 0 2>/dev/null)
+	if [ -z "$_hash" ]; then
+		die 'mkpasswd could not hash the password'
+	fi
+	case "$_hash" in
+	\$5\$*) : ;;
+	*) warn "unexpected password hash: $_hash" ;;
+	esac
+	set_shadow_entry "$_shadow" "$USER_NAME" "$_hash" "$_days" ||
+		die "cannot write $_shadow"
+	note 'the password is stored as a sha256 crypt hash, like the one of root'
+
+	_added=
+	for _name in $USER_GROUPS; do
+		if ! awk -F: -v g="$_name" '$1 == g { found = 1 } END { exit !found }' "$_group"; then
+			case "$_name" in
+			input | seat)
+				ensure_group "$_group" "$_name" ||
+					warn "cannot create the group $_name"
+				;;
+			*)
+				continue
+				;;
+			esac
+		fi
+		if add_group_member "$_group" "$_name" "$USER_NAME"; then
+			_added="$_added $_name"
+		else
+			warn "cannot add $USER_NAME to the group $_name"
+		fi
+	done
+	note "groups:${_added:- none}"
+
+	say ''
+	say "  $USER_NAME is ready. Log in on the console: \"doas\" works for root,"
+	say '  "doelzaberi-gui" starts the Wayland session (weston).'
+}
+
+create_runtime_dirs()
+{
+	step 'Recreating the volatile directories of this medium'
+	_root=$WORKDIR/root
+	_created=
+	for _dir in $RUNTIME_DIRS $RUNTIME_SUBDIRS; do
+		if [ ! -d "${_root}${_dir}" ]; then
+			mkdir -p "${_root}${_dir}" || die "cannot create $_dir in the new root filesystem"
+			_created="$_created $_dir"
+		fi
+	done
+	if [ -n "$_created" ]; then
+		note "created:$_created"
+	else
+		note 'they are all there already'
+	fi
+	chown 0:0 "${_root}/dev" "${_root}/proc" "${_root}/sys" "${_root}/run" "${_root}/tmp" \
+		"${_root}/mnt" "${_root}/media" || die 'cannot set the ownership of the volatile directories'
+	chown 0:daemon "${_root}/run/lock" "${_root}/run/lock/subsys" 2>/dev/null ||
+		warn 'cannot set the group of /run/lock to daemon'
+	chmod 0755 "${_root}/dev" "${_root}/proc" "${_root}/sys" "${_root}/run" "${_root}/dev/pts" \
+		"${_root}/mnt" "${_root}/media" || die 'cannot set the modes of the volatile directories'
+	chmod 1777 "${_root}/tmp" "${_root}/dev/shm"
+	chmod 0775 "${_root}/run/lock" "${_root}/run/lock/subsys"
+
+	for _dir in $RUNTIME_DIRS; do
+		[ -d "${_root}${_dir}" ] || die "the new root filesystem has no $_dir"
+	done
+	[ -f "${_root}/etc/fstab" ] || warn "there is no /etc/fstab in ${_root}"
+	[ -x "${_root}/sbin/init" ] || warn "there is no /sbin/init in ${_root}"
+	note '/dev is mounted by the kernel, /proc by OpenRC, /run and /tmp from /etc/fstab'
+}
+
+write_fstab()
+{
+	step 'Writing /etc/fstab of the installed system'
+	_fstab=$WORKDIR/root/etc/fstab
+	if [ ! -f "$_fstab" ]; then
+		warn "$_fstab does not exist"
+		return 0
+	fi
+	_keep=$(awk '/^[[:space:]]*#/ { next } NF == 0 { next } $2 == "/" || $2 == "/proc" { next } { print }' "$_fstab")
+	{
+		printf '%s\t/\tbtrfs\tdefaults,noatime\t0\t0\n' "$ROOT_PARAM"
+		printf 'proc\t/proc\tproc\tnoexec,nosuid,nodev\t0\t0\n'
+		if [ -n "$_keep" ]; then
+			printf '%s\n' "$_keep"
+		fi
+	} > "$_fstab.new" || die 'cannot write the new fstab'
+	mv "$_fstab.new" "$_fstab"
+	chmod 0644 "$_fstab"
+	note "$ROOT_PARAM on /, btrfs, defaults,noatime, no fsck (btrfs checks itself)"
+	note 'proc on /proc, noexec,nosuid,nodev'
+	note 'the tmpfs entries of this medium are kept, so /run and /tmp stay in RAM'
+}
+
+install_bootloader()
+{
+	step 'Installing the GRUB EFI bootloader'
+	[ -d "$GRUB_DIR" ] || die "GRUB modules are missing: $GRUB_DIR"
+
+	cat > "$WORKDIR/esp/EFI/BOOT/grub.cfg" <<EOF
+set default=0
+set timeout=15
+
+menuentry "doelzaberi (btrfs, persistent)" {
+	linux /boot/bzImage root=$ROOT_PARAM rootwait rootfstype=btrfs console=tty1 loglevel=4
+}
+
+menuentry "doelzaberi (btrfs, persistent) - verbose boot" {
+	linux /boot/bzImage root=$ROOT_PARAM rootwait rootfstype=btrfs console=tty1 loglevel=7
+}
+
+menuentry "doelzaberi (btrfs, persistent) - safe graphics (nomodeset)" {
+	linux /boot/bzImage root=$ROOT_PARAM rootwait rootfstype=btrfs console=tty1 loglevel=7 nomodeset
+}
+
+menuentry "doelzaberi (btrfs, persistent) - by partition name" {
+	linux /boot/bzImage root=PARTLABEL=$BTRFS_LABEL rootwait rootfstype=btrfs console=tty1 loglevel=7
+}
+EOF
+
+	if [ "$WITH_INITRD" = "yes" ]; then
+		cat >> "$WORKDIR/esp/EFI/BOOT/grub.cfg" <<EOF
+
+menuentry "doelzaberi (live, RAM)" {
+	linux /boot/bzImage console=tty1 loglevel=4
+	initrd /boot/initrd
+}
+
+menuentry "doelzaberi (live, RAM) - verbose boot" {
+	linux /boot/bzImage console=tty1 loglevel=7
+	initrd /boot/initrd
+}
+
+menuentry "doelzaberi (live, RAM) - safe graphics (nomodeset)" {
+	linux /boot/bzImage console=tty1 loglevel=7 nomodeset
+	initrd /boot/initrd
+}
+EOF
+	fi
+
+	grub-mkimage -d "$GRUB_DIR" -O x86_64-efi \
+		-o "$WORKDIR/esp/EFI/BOOT/BOOTX64.EFI" \
+		-p /EFI/BOOT $GRUB_MODULES || die 'grub-mkimage failed'
+
+	note "$ESP_PART:/EFI/BOOT/BOOTX64.EFI"
+	note "$ESP_PART:/EFI/BOOT/grub.cfg"
+	note "$ESP_PART:/boot/bzImage"
+
+	[ "$WITH_NVRAM" = "yes" ] || return 0
+	if [ ! -d /sys/firmware/efi/efivars ] || ! command -v efibootmgr >/dev/null 2>&1; then
+		note 'the firmware uses /EFI/BOOT/BOOTX64.EFI as fallback'
+		return 0
+	fi
+	if efibootmgr -q -c -d "$DEVICE" -p 1 -L 'DoelzaberiOS' -l '\EFI\BOOT\BOOTX64.EFI'; then
+		note 'UEFI boot entry "DoelzaberiOS" added to the firmware'
+	else
+		warn 'efibootmgr could not add the boot entry, /EFI/BOOT/BOOTX64.EFI is the fallback'
+	fi
+}
+
+finish_install()
+{
+	step 'Finishing'
+	note 'writing the caches'
+	sync
+	umount "$WORKDIR/esp" || warn "cannot unmount $WORKDIR/esp"
+	umount "$WORKDIR/root" || warn "cannot unmount $WORKDIR/root"
+	if [ -n "$SOURCE_DEVICE" ]; then
+		umount "$WORKDIR/medium" 2>/dev/null || true
+	fi
+	reread_parttable "$DEVICE"
+
+	say ''
+	rule
+	say "DoelzaberiOS is installed on $DEVICE"
+	rule
+	say "  $ESP_PART  FAT32, LABEL=$ESP_LABEL   GRUB EFI bootloader + kernel"
+	say "  $ROOT_PART  btrfs, LABEL=$BTRFS_LABEL   root filesystem (root=$ROOT_PARAM)"
+	say ''
+	say 'Next steps:'
+	say '  1. remove the installation medium'
+	say '  2. reboot and pick the new disk in the firmware boot menu'
+	if [ "$CREATE_USER" = "yes" ]; then
+		say "  3. log in as $USER_NAME with the password you typed"
+		say "     \"doas\" gives root, \"doelzaberi-gui\" the Wayland session"
+	else
+		say '  3. log in as root with the password of this system'
+	fi
+	say ''
+	say 'The installed system is a copy of this running system: same kernel,'
+	say 'same services, same files.'
+}
+
+print_plan()
+{
+	say ''
+	rule
+	say 'Dry run: nothing is written. The plan is'
+	say ''
+	say "  1. erase the partition table of $DEVICE"
+	say "  2. create $(part_node "$DEVICE" 1): EFI system, $ESP_SIZE, FAT32, LABEL=$ESP_LABEL"
+	say "  3. create $(part_node "$DEVICE" 2): Linux filesystem, ${ROOT_SIZE:-the remaining space}, btrfs, LABEL=$BTRFS_LABEL"
+	say "  4. install boot/bzImage from ${SOURCE:-the boot medium} onto $(part_node "$DEVICE" 1)"
+	say "  5. copy this running system onto $(part_node "$DEVICE" 2)"
+	say '  6. recreate the volatile directories (/dev, /proc, /sys, /run, /tmp) in the copy'
+	say '  7. write /etc/fstab with root=PARTUUID=... and the /proc entry'
+	say "  8. write GRUB (x86_64-efi, prefix /EFI/BOOT) onto $(part_node "$DEVICE" 1)"
+	if [ "$CREATE_USER" = "yes" ]; then
+		say "  9. create the account $USER_NAME in the copy (uid >= 1000, home from /etc/skel)"
+	fi
+	rule
+}
+
+check_tools()
+{
+	_missing=
+	for _tool in $NEEDED_TOOLS; do
+		command -v "$_tool" >/dev/null 2>&1 || _missing="$_missing $_tool"
+	done
+	if [ -n "$_missing" ]; then
+		die "these tools are missing:$_missing"
+	fi
+}
+
+cleanup()
+{
+	umount "$WORKDIR/medium" 2>/dev/null
+	umount "$WORKDIR/probe" 2>/dev/null
+	umount "$WORKDIR/esp" 2>/dev/null
+	umount "$WORKDIR/root" 2>/dev/null
+	rm -rf "$WORKDIR"
+	return 0
+}
+
+main()
+{
+	if [ "$LIST_ONLY" = "yes" ]; then
+		list_disks
+		exit 0
+	fi
+
+	[ "$(id -u)" = "0" ] || die 'this script must be run as root'
+	check_tools
+	mkdir -p "$WORKDIR" || die "cannot create $WORKDIR"
+	trap cleanup EXIT INT TERM
+
+	if [ -z "$DEVICE" ]; then
+		choose_disk
+	fi
+	validate_device
+	ask_account
+	confirm_device
+
+	if [ "$DRY_RUN" = "yes" ]; then
+		print_plan
+		exit 0
+	fi
+
+	partition_disk
+	format_partitions
+	mount_target
+	find_source
+	copy_kernel
+	copy_system
+	create_account
+	create_runtime_dirs
+	write_fstab
+	install_bootloader
+	finish_install
+}
+
+main "$@"

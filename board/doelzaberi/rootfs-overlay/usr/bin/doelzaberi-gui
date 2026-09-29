@@ -1,0 +1,131 @@
+#!/bin/sh
+
+set -u
+
+PROG=${0##*/}
+COMPOSITOR=${DOELZABERI_COMPOSITOR:-weston}
+PIXMAN=no
+CLIENT=
+
+usage()
+{
+	cat <<EOF
+$PROG - start the Wayland session
+
+Usage:
+  $PROG [options] [command [arguments]]
+
+Options:
+      --compositor=NAME   compositor to run (default: $COMPOSITOR)
+  -p, --pixman            ask weston for the software renderer
+  -h, --help              this help
+
+The session runs in the Linux console; log out of the compositor to get the
+shell back. Without a command, weston starts its own desktop shell.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-h | --help)
+		usage
+		exit 0
+		;;
+	-p | --pixman)
+		PIXMAN=yes
+		;;
+	--compositor=*)
+		COMPOSITOR=${1#*=}
+		;;
+	--compositor)
+		[ $# -ge 2 ] || { printf '%s: --compositor needs a name\n' "$PROG" >&2; exit 1; }
+		COMPOSITOR=$2
+		shift
+		;;
+	--)
+		shift
+		break
+		;;
+	-*)
+		printf '%s: unknown option: %s\n' "$PROG" "$1" >&2
+		exit 1
+		;;
+	*)
+		break
+		;;
+	esac
+	shift
+done
+
+CLIENT="$*"
+
+if command -v "$COMPOSITOR" >/dev/null 2>&1; then
+	:
+else
+	printf '%s: %s is not installed\n' "$PROG" "$COMPOSITOR" >&2
+	exit 1
+fi
+
+if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -d "${XDG_RUNTIME_DIR:-/nonexistent}" ]; then
+	XDG_RUNTIME_DIR="/run/user/$(id -u)"
+	if [ ! -d "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
+		XDG_RUNTIME_DIR="/tmp/doelzaberi-runtime-$(id -u)"
+		mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null
+		chmod 0700 "$XDG_RUNTIME_DIR" 2>/dev/null
+	fi
+	if [ ! -d "$XDG_RUNTIME_DIR" ]; then
+		printf '%s: cannot create XDG_RUNTIME_DIR\n' "$PROG" >&2
+		exit 1
+	fi
+fi
+export XDG_RUNTIME_DIR
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-weston}"
+export LIBSEAT_BACKEND="${LIBSEAT_BACKEND:-seatd}"
+export XKB_DEFAULT_LAYOUT="${XKB_DEFAULT_LAYOUT:-us,ru}"
+export XKB_DEFAULT_OPTIONS="${XKB_DEFAULT_OPTIONS:-grp:alt_shift_toggle}"
+
+if [ ! -e /dev/dri/card0 ]; then
+	printf '%s: warning: /dev/dri/card0 is missing\n' "$PROG" >&2
+	printf '       the kernel probably runs with nomodeset, or the driver did not load\n' >&2
+	printf '       try "dmesg | grep -i drm" and the nomodeset free boot entry\n' >&2
+fi
+
+if [ -L /run/seatd.sock ] || [ -S /run/seatd.sock ]; then
+	:
+elif [ ! -S /run/seatd.sock ]; then
+	printf '%s: warning: seatd is not running (rc-service seatd start)\n' "$PROG" >&2
+fi
+
+if [ "${DOELZABERI_IN_SESSION:-no}" != "yes" ] && command -v dbus-run-session >/dev/null 2>&1; then
+	DOELZABERI_IN_SESSION=yes
+	export DOELZABERI_IN_SESSION
+	exec dbus-run-session -- "$0" "$@"
+fi
+
+case "${COMPOSITOR##*/}" in
+cage)
+	[ -n "$CLIENT" ] || CLIENT=foot
+	set -- $CLIENT
+	exec "$COMPOSITOR" "$@"
+	;;
+esac
+
+if [ -n "$CLIENT" ]; then
+	(
+		_tries=0
+		while [ "$_tries" -lt 100 ]; do
+			[ -S "$XDG_RUNTIME_DIR/${WAYLAND_DISPLAY:-wayland-0}" ] && break
+			sleep 0.1
+			_tries=$((_tries + 1))
+		done
+		exec $CLIENT
+	) &
+fi
+
+if [ "$PIXMAN" = yes ]; then
+	exec "$COMPOSITOR" --use-pixman
+fi
+
+exec "$COMPOSITOR"

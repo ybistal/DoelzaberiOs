@@ -1,0 +1,9 @@
+config BR2_PACKAGE_FASTFETCH
+	bool "fastfetch"
+	depends on BR2_USE_MMU # fork()
+	help
+	  Fastfetch is a neofetch-like tool for fetching system
+	  information and displaying it in a pretty way. It is
+	  written in C and does not depend on any interpreter.
+
+	  https://github.com/fastfetch-cli/fastfetch

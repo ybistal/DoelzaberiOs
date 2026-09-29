@@ -1,0 +1,36 @@
+#!/sbin/openrc-run
+
+description="Per user runtime directories (XDG_RUNTIME_DIR)"
+
+depend()
+{
+	need localmount
+	before agetty.tty1
+}
+
+start()
+{
+	ebegin "Creating the per user runtime directories"
+	_failed=
+	for _uid in $(awk -F: '$3 >= 1000 && $3 < 60000 { print $3 }' /etc/passwd | sort -u); do
+		if mkdir -p "/run/user/$_uid" &&
+			chown "$_uid" "/run/user/$_uid" &&
+			chmod 0700 "/run/user/$_uid"; then
+			:
+		else
+			_failed="$_failed $_uid"
+		fi
+	done
+	if [ -n "$_failed" ]; then
+		eend 1 "cannot create /run/user/$_failed"
+		return 1
+	fi
+	eend 0
+}
+
+stop()
+{
+	ebegin "Removing the per user runtime directories"
+	rm -rf /run/user/* 2>/dev/null
+	eend 0
+}

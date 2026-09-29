@@ -1,0 +1,9 @@
+Welcome to DoelzaberiOS
+
+  doas <command>        become root (your account is in the wheel group)
+  doelzaberi-gui        start the wayland session (weston)
+       --pixman         software renderer, if the card has no EGL driver
+  doelzaberi-install    install this system on a disk (root only)
+  curl                  https works out of the box (ca-certificates)
+
+The fish shell is the default shell and it is already configured.
