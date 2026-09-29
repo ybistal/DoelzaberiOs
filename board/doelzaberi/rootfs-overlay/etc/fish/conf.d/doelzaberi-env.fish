@@ -1,4 +1,3 @@
-
 if not set -q XDG_RUNTIME_DIR
     set -l candidate /run/user/(id -u)
     if test -d $candidate; and test -w $candidate

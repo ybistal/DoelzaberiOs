@@ -1,4 +1,3 @@
-
 FISH_VERSION = 3.7.1
 FISH_SOURCE = fish-$(FISH_VERSION).tar.xz
 FISH_SITE = https://github.com/fish-shell/fish-shell/releases/download/$(FISH_VERSION)

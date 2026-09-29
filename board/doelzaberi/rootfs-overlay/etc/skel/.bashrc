@@ -1,4 +1,3 @@
-
 case $- in
 *i*)
 	alias ll='ls -lh'

@@ -1,4 +1,3 @@
-
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
 	_dir="/run/user/$(id -u)"
 	if [ -d "$_dir" ] && [ -w "$_dir" ]; then
