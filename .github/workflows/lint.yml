@@ -1,0 +1,29 @@
+name: lint
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the tools the checks use
+        run: sudo apt-get update && sudo apt-get install -y shellcheck grub-common
+
+      - name: Run the checks
+        run: ./scripts/lint.sh
+
+      - name: Check the repository for leftovers
+        run: |
+          found=0
+          for pattern in '*.log' '*.orig' '*.rej' '*~' '.config' 'build.log'; do
+            for file in $(git ls-files -- "$pattern"); do
+              echo "::error file=$file::should not be tracked"
+              found=1
+            done
+          done
+          [ "$found" = 0 ] || exit 1

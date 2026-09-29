@@ -1,0 +1,20 @@
+diff --git a/package/Config.in b/package/Config.in
+index dcca214383..5e99b7609a 100644
+--- a/package/Config.in
++++ b/package/Config.in
+@@ -2742,6 +2742,7 @@ comment "Shells"
+ 	source "package/bash/Config.in"
+ 	source "package/dash/Config.in"
+ 	source "package/mksh/Config.in"
++	source "package/fish/Config.in"
+ 	source "package/nushell/Config.in"
+ 	source "package/zsh/Config.in"
+ comment "Utilities"
+@@ -2756,6 +2757,7 @@ comment "Utilities"
+ 	source "package/dtach/Config.in"
+ 	source "package/easy-rsa/Config.in"
+ 	source "package/eza/Config.in"
++	source "package/fastfetch/Config.in"
+ 	source "package/file/Config.in"
+ 	source "package/gnupg/Config.in"
+ 	source "package/gnupg2/Config.in"

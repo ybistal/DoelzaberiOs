@@ -1,0 +1,115 @@
+diff --git a/boot/grub2/grub.cfg b/boot/grub2/grub.cfg
+index ad56d989a7..d1d9834a96 100644
+--- a/boot/grub2/grub.cfg
++++ b/boot/grub2/grub.cfg
+@@ -1,24 +1,29 @@
+-# GRUB configuration that is stored in the El Torito EFI boot image of the
+-# ISO9660 image (rootfs.iso9660, shipped as doelzaberi.iso).
+-#
+-# When booting from a CD/DVD, GRUB itself is loaded from a small FAT image,
+-# whereas the kernel and the initrd live in the ISO9660 filesystem of the
+-# very same medium.  The 'iso9660' and 'search' modules are therefore built
+-# into the GRUB EFI image (BR2_TARGET_GRUB2_BUILTIN_MODULES_EFI) so that the
+-# kernel can be located no matter which filesystem GRUB was started from.
+-#
+-# The initrd is rootfs.cpio, which carries a complete root filesystem and
+-# boots on its own (its /init execs /sbin/init), hence no 'root=' is needed.
+-
+ set default="0"
+ set timeout="10"
+ 
+-# Fall back to the optical drive first, then prefer whichever medium really
+-# carries the kernel (this also works for disk and USB stick images).
+ set root=(cd0)
+-search --no-floppy --file --set=root /boot/bzImage
++# The live medium is the only volume labelled DOELZABERI; prefer it, because it
++# carries both the kernel and the initrd.  On a USB stick (cd0) does not exist,
++# so fall back to whichever volume really has the initrd/kernel.
++search --no-floppy --label --set=root DOELZABERI
++if [ ! -f "($root)/boot/initrd" ]; then
++	search --no-floppy --file --set=root /boot/initrd
++fi
++if [ ! -f "($root)/boot/bzImage" ]; then
++	search --no-floppy --file --set=root /boot/bzImage
++fi
+ 
+ menuentry "doelzaberi (live, RAM)" {
+ 	linux /boot/bzImage console=tty1 loglevel=4
+ 	initrd /boot/initrd
+ }
++
++menuentry "doelzaberi (live, RAM) - verbose boot" {
++	linux /boot/bzImage console=tty1 loglevel=7
++	initrd /boot/initrd
++}
++
++menuentry "doelzaberi (live, RAM) - safe graphics (nomodeset)" {
++	linux /boot/bzImage console=tty1 loglevel=7 nomodeset
++	initrd /boot/initrd
++}
+diff --git a/fs/iso9660/grub.cfg b/fs/iso9660/grub.cfg
+index d3318898b3..c724c01d01 100644
+--- a/fs/iso9660/grub.cfg
++++ b/fs/iso9660/grub.cfg
+@@ -1,12 +1,25 @@
+ set default="0"
+ set timeout="10"
+ 
+-# The kernel and the initrd may live on the ISO9660 volume of the medium
+-# (CD/DVD, or the ISO9660 image dd'ed to a USB stick) or next to this file on
+-# an EFI System Partition: use the volume that actually carries the kernel.
+-search --no-floppy --file --set=root /boot/bzImage
++# The live medium is the only volume labelled DOELZABERI: it carries both the
++# kernel and the initrd, so prefer it.  Fall back to whichever volume really
++# has the kernel (a USB stick booted by the firmware, for instance).
++search --no-floppy --label --set=root DOELZABERI
++if [ ! -f "($root)__KERNEL_PATH__" ]; then
++	search --no-floppy --file --set=root __KERNEL_PATH__
++fi
+ 
+ menuentry "doelzaberi (live, RAM)" {
+ 	linux ($root)__KERNEL_PATH__ console=tty1 loglevel=4
+ 	initrd ($root)__INITRD_PATH__
+ }
++
++menuentry "doelzaberi (live, RAM) - verbose boot" {
++	linux ($root)__KERNEL_PATH__ console=tty1 loglevel=7
++	initrd ($root)__INITRD_PATH__
++}
++
++menuentry "doelzaberi (live, RAM) - safe graphics (nomodeset)" {
++	linux ($root)__KERNEL_PATH__ console=tty1 loglevel=7 nomodeset
++	initrd ($root)__INITRD_PATH__
++}
+diff --git a/fs/iso9660/iso9660.mk b/fs/iso9660/iso9660.mk
+index 04a5764b3e..31ae5b3813 100644
+--- a/fs/iso9660/iso9660.mk
++++ b/fs/iso9660/iso9660.mk
+@@ -80,12 +80,6 @@ ROOTFS_ISO9660_DEPENDENCIES += grub2 host-dosfstools host-mtools
+ ROOTFS_ISO9660_EFI_PARTITION = boot/fat.efi
+ ROOTFS_ISO9660_EFI_PARTITION_PATH = $(ROOTFS_ISO9660_TMP_TARGET_DIR)/$(ROOTFS_ISO9660_EFI_PARTITION)
+ ROOTFS_ISO9660_EFI_PARTITION_CONTENT = $(BINARIES_DIR)/efi-part
+-# FAT filesystem image that holds the GRUB EFI image and its configuration.
+-# It is used twice: as the El Torito EFI boot image on the ISO9660 filesystem
+-# (CD/DVD) and as the EFI System Partition of the hybrid MBR partition table
+-# (USB stick, see ROOTFS_ISO9660_OPTS_EFI).  4 MiB is the smallest size that
+-# mkfs.fat accepts for FAT16, and FAT16 is what UEFI firmware handles most
+-# reliably - a FAT12 El Torito image is known to trip some firmwares up.
+ ROOTFS_ISO9660_EFI_FAT_IMAGE = $(BINARIES_DIR)/efi-iso.vfat
+ ROOTFS_ISO9660_EFI_FAT_SIZE = 4
+ ROOTFS_ISO9660_BOOTLOADER_CONFIG_PATH = \
+@@ -177,14 +171,6 @@ ROOTFS_ISO9660_OPTS_BIOS = \
+ 	-boot-load-size 4 \
+ 	-boot-info-table
+ 
+-# UEFI firmware boots an ISO9660 image either through its El Torito entry
+-# (CD/DVD readers) or through the EFI System Partition of a hybrid MBR
+-# partition table (firmware booting a USB stick, where El Torito support is
+-# optional and often incomplete).  The partition holding the GRUB EFI image is
+-# therefore appended to the image and marked as EFI System Partition (type
+-# 0xef); -part_like_isohybrid makes xorriso create that partition table
+-# without needing a SYSLINUX MBR template.  The MBR lives in the (unused)
+-# system area of the ISO9660 image, so optical media are unaffected.
+ ROOTFS_ISO9660_OPTS_EFI = \
+ 	--efi-boot $(ROOTFS_ISO9660_EFI_PARTITION) \
+ 	-no-emul-boot \

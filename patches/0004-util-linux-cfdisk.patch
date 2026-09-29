@@ -1,0 +1,34 @@
+diff --git a/package/util-linux/Config.in b/package/util-linux/Config.in
+index e6ee4c3ced..424ca37bb2 100644
+--- a/package/util-linux/Config.in
++++ b/package/util-linux/Config.in
+@@ -85,6 +85,17 @@ config BR2_PACKAGE_UTIL_LINUX_CAL
+ 	help
+ 	  Display a calendar, or some part of it
+ 
++config BR2_PACKAGE_UTIL_LINUX_CFDISK
++	bool "cfdisk"
++	depends on BR2_USE_MMU # fork()
++	select BR2_PACKAGE_NCURSES
++	select BR2_PACKAGE_UTIL_LINUX_LIBFDISK
++	select BR2_PACKAGE_UTIL_LINUX_LIBSMARTCOLS
++	help
++	  Curses based disk partition table editor
++
++	  Also installs fdisk and sfdisk from util-linux.
++
+ config BR2_PACKAGE_UTIL_LINUX_CHFN_CHSH
+ 	bool "chfn/chsh"
+ 	depends on (BR2_ENABLE_LOCALE && BR2_USE_WCHAR) # linux-pam
+diff --git a/package/util-linux/util-linux.mk b/package/util-linux/util-linux.mk
+index b4175024c4..72c4e0571a 100644
+--- a/package/util-linux/util-linux.mk
++++ b/package/util-linux/util-linux.mk
+@@ -167,6 +167,7 @@ UTIL_LINUX_CONF_OPTS += \
+ 	$(if $(BR2_PACKAGE_UTIL_LINUX_AGETTY),--enable-agetty,--disable-agetty) \
+ 	$(if $(BR2_PACKAGE_UTIL_LINUX_BFS),--enable-bfs,--disable-bfs) \
+ 	$(if $(BR2_PACKAGE_UTIL_LINUX_CAL),--enable-cal,--disable-cal) \
++	$(if $(BR2_PACKAGE_UTIL_LINUX_CFDISK),--enable-fdisks,--disable-fdisks) \
+ 	$(if $(BR2_PACKAGE_UTIL_LINUX_CHFN_CHSH),--enable-chfn-chsh,--disable-chfn-chsh) \
+ 	$(if $(BR2_PACKAGE_UTIL_LINUX_CHMEM),--enable-chmem,--disable-chmem) \
+ 	$(if $(BR2_PACKAGE_UTIL_LINUX_CRAMFS),--enable-cramfs,--disable-cramfs) \
