@@ -1,13 +1,3 @@
-DoelzaberiOS is distributed under the terms of the GNU General Public License,
-version 2 of the License, or (at your option) any later version, reproduced
-below.
-
-Some third-party files, and every package that the build fetches, carry their
-own license statement; see THIRD_PARTY.md.  The patch series in patches/ is
-applied to Buildroot and is covered by the license of the files it patches.
-
------------------------------------------------------------------
-
 		    GNU GENERAL PUBLIC LICENSE
 		       Version 2, June 1991
 
@@ -347,3 +337,20 @@ proprietary programs.  If your program is a subroutine library, you may
 consider it more useful to permit linking proprietary applications with the
 library.  If this is what you want to do, use the GNU Lesser General
 Public License instead of this License.
+
+--------------------------------------------------------------------
+
+DoelzaberiOS
+
+Copyright (C) 2026 ybistal <finishkatyan@gmail.com>
+
+This distribution is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 2 of the License, or (at your option) any
+later version.
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE.  See the GNU General Public License above for more details.
+
+Source code: https://github.com/ybistal/DoelzaberiOs
