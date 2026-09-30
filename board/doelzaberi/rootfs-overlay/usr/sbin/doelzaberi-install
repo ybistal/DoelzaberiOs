@@ -11,7 +11,7 @@ BTRFS_LABEL=doelzaberi
 WORKDIR=/run/doelzaberi-install
 GRUB_DIR=/usr/lib/grub/x86_64-efi
 GRUB_MODULES="boot linux btrfs ext2 fat iso9660 search search_fs_file search_fs_uuid part_gpt part_msdos normal efi_gop efi_uga test echo"
-NEEDED_TOOLS="sgdisk mkfs.vfat mkfs.btrfs grub-mkimage tar awk install mount umount sync chown chmod mkpasswd od cut stty"
+NEEDED_TOOLS="sgdisk mkfs.vfat mkfs.btrfs grub-mkimage tar awk install mount umount sync chown chmod mkpasswd od cut stty wget"
 
 RUNTIME_DIRS="/dev /proc /sys /run /tmp /mnt /media"
 RUNTIME_SUBDIRS="/dev/pts /dev/shm /run/lock /run/lock/subsys"
@@ -22,6 +22,9 @@ DRY_RUN=no
 FORCE=no
 WITH_INITRD=yes
 WITH_NVRAM=yes
+WITH_GUI=ask
+GUI_DIR=/usr/share/doelzaberi/gui
+GUI_BASE_URL=
 CREATE_USER=ask
 DEFAULT_USER=doelzaberi
 USER_NAME=
@@ -43,7 +46,7 @@ DISK_SECTORS=
 DISK_HUMAN=
 DISK_MODEL=
 STEP=0
-STEPS=12
+STEPS=13
 
 say()
 {
@@ -283,7 +286,11 @@ Options:
   -y, --yes            do not ask for the confirmation
   -n, --dry-run        print the plan and exit without writing anything
       --esp-size SIZE  size of the EFI partition (default: $ESP_SIZE, also 512M, 1G, ...)
-      --root-size SIZE size of the root partition (default: all remaining space)
+      --root-size SIZE size of the root partition, for example 40G
+                       (default: ask, the whole remaining space is offered)
+      --gui            install the graphical software (niri, alacritty,
+                       ghostty, noctalia, nautilus) and start it at login
+      --no-gui         do not install the graphical software (default: ask)
       --source DIR     directory with boot/bzImage and boot/initrd
                        (default: the medium this system was booted from)
       --no-initrd      do not install the initrd, so there is no "live, RAM" entry
@@ -328,6 +335,8 @@ while [ $# -gt 0 ]; do
 		--shell=*)     USER_SHELL=${1#*=} ;;
 		--no-initrd)   WITH_INITRD=no ;;
 		--no-nvram)    WITH_NVRAM=no ;;
+		--gui)         WITH_GUI=yes ;;
+		--no-gui)      WITH_GUI=no ;;
 		-h|--help)     usage; exit 0 ;;
 		--source)      [ $# -ge 2 ] || die '--source needs a directory'
 		               SOURCE=$2; shift ;;
@@ -661,11 +670,172 @@ confirm_device()
 	fi
 	say "  $ESP_LABEL         ${ESP_SIZE}      FAT32   GRUB EFI bootloader, kernel, initrd"
 	say "  $BTRFS_LABEL   ${ROOT_SIZE:-all remaining space}   btrfs   this system, as the new root filesystem"
+	if [ "$WITH_GUI" = "yes" ]; then
+		say "  graphical software   niri, alacritty, ghostty, noctalia, nautilus"
+	fi
 	rule
 	printf 'Type the disk name to confirm (%s): ' "$DISK_NAME"
 	read -r _answer || _answer=
 	say ''
 	[ "$_answer" = "$DISK_NAME" ] || die 'aborted, nothing was written'
+}
+
+size_to_bytes()
+{
+	_value=$1
+	_number=${_value%[A-Za-z]*}
+	_unit=${_value##*[0-9]}
+	case "$_unit" in
+		''|B) _mult=1 ;;
+		K|k) _mult=1024 ;;
+		M|m) _mult=$((1024 * 1024)) ;;
+		G|g) _mult=$((1024 * 1024 * 1024)) ;;
+		T|t) _mult=$((1024 * 1024 * 1024 * 1024)) ;;
+		*) return 1 ;;
+	esac
+	printf '%s' $((_number * _mult))
+}
+
+ask_root_size()
+{
+	if [ -n "$ROOT_SIZE" ]; then
+		return 0
+	fi
+	_esp_bytes=$(size_to_bytes "$ESP_SIZE") || _esp_bytes=268435456
+	_remaining=$((DISK_SECTORS * 512 - _esp_bytes))
+	_hint=$((_remaining / 1024 / 1024 / 1024))
+	while :; do
+		printf 'How much space should the system use? (for example 40G, empty for all %sG): ' "$_hint"
+		read -r _answer || _answer=
+		[ -n "$_answer" ] || break
+		if ! echo "$_answer" | grep -qE '^[0-9]+[KMGTPkmgt]?$'; then
+			say "       invalid size: $_answer"
+			continue
+		fi
+		_bytes=$(size_to_bytes "$_answer") || { say "       invalid size: $_answer"; continue; }
+		if [ "$_bytes" -le 0 ] || [ "$_bytes" -gt "$_remaining" ]; then
+			say "       the system partition is too big (only ${_hint}G are available)"
+			continue
+		fi
+		case "$_answer" in
+			*[KMGTPkmgt]) ROOT_SIZE=$_answer ;;
+			*)            ROOT_SIZE=${_answer}G ;;
+		esac
+		break
+	done
+}
+
+ask_gui()
+{
+	if [ "$WITH_GUI" != "ask" ]; then
+		return 0
+	fi
+	printf 'Do you want to install graphical software? (niri, alacritty, ghostty, noctalia, nautilus) [y/N] '
+	read -r _answer || _answer=
+	case "$_answer" in
+		y|Y|yes|YES|Yes) WITH_GUI=yes ;;
+		*)               WITH_GUI=no ;;
+	esac
+}
+
+gui_configs()
+{
+	_skel="$WORKDIR/root/etc/skel"
+	mkdir -p "$_skel/.config/niri" "$_skel/.config/alacritty" \
+		"$_skel/.config/ghostty" "$_skel/.config/noctalia" \
+		"$_skel/.config/nautilus" || die 'cannot create the GUI config directories'
+	cat > "$_skel/.config/niri/config.kdl" <<EOF
+spawn-at-startup "noctalia"
+spawn-at-startup "alacritty"
+spawn-at-startup "ghostty"
+spawn-at-startup "nautilus"
+
+input {
+    xkb {
+        layout "us,ru"
+        options "grp:alt_shift_toggle"
+    }
+}
+EOF
+	cat > "$_skel/.config/alacritty/alacritty.toml" <<EOF
+[font]
+size = 12
+
+[window]
+padding.x = 4
+padding.y = 4
+EOF
+	cat > "$_skel/.config/ghostty/config" <<EOF
+font-size = 12
+EOF
+	cat > "$_skel/.config/noctalia/config.toml" <<EOF
+[general]
+EOF
+	cat > "$_skel/.config/nautilus/nautilus.desktop" <<EOF
+[Desktop Entry]
+Name=Files
+Exec=nautilus
+Icon=system-file-manager
+Type=Application
+EOF
+}
+
+gui_fetch()
+{
+	_pkg=$1
+	_dest=$2
+	if [ -f "$GUI_DIR/$_pkg.tar.gz" ]; then
+		install -m 0644 "$GUI_DIR/$_pkg.tar.gz" "$_dest" || return 1
+		return 0
+	fi
+	[ -n "$GUI_BASE_URL" ] || return 1
+	wget -q -O "$_dest" "$GUI_BASE_URL/$_pkg.tar.gz" || return 1
+	return 0
+}
+
+install_gui()
+{
+	step 'Installing the graphical software'
+	_workdir="$WORKDIR/gui"
+	mkdir -p "$_workdir" || die "cannot create $_workdir"
+	_failed=
+	for _pkg in niri alacritty ghostty noctalia nautilus; do
+		printf '       %s ... ' "$_pkg"
+		if [ -x "$WORKDIR/root/usr/bin/$_pkg" ]; then
+			say 'included'
+			continue
+		fi
+		if gui_fetch "$_pkg" "$_workdir/$_pkg.tar.gz"; then
+			if tar -C "$WORKDIR/root" -xpf "$_workdir/$_pkg.tar.gz"; then
+				say 'ok'
+			else
+				say 'extract failed'
+				_failed="$_failed $_pkg"
+			fi
+		else
+			say 'skipped'
+			_failed="$_failed $_pkg"
+		fi
+	done
+	gui_configs
+	rm -rf "$WORKDIR/root/usr/share/doelzaberi/gui"
+	rm -rf "$_workdir"
+	_gui_enabled=
+	if [ -x "$WORKDIR/root/usr/bin/niri" ] || [ -x "$WORKDIR/root/usr/bin/noctalia" ]; then
+		_gui_enabled=yes
+	fi
+	if [ -n "$_gui_enabled" ]; then
+		if [ -e "$WORKDIR/root/etc/runlevels/default" ]; then
+			ln -sf /etc/init.d/dbus-daemon "$WORKDIR/root/etc/runlevels/default/dbus-daemon" 2>/dev/null
+			ln -sf /etc/init.d/seatd "$WORKDIR/root/etc/runlevels/default/seatd" 2>/dev/null
+		fi
+		say ''
+		note 'graphical software is installed and starts at login'
+		note 'run  rc-service seatd start  if seatd is not running'
+	fi
+	if [ -n "$_failed" ]; then
+		warn "these packages could not be installed:$_failed"
+	fi
 }
 
 reread_parttable()
@@ -907,8 +1077,13 @@ create_account()
 	note "groups:${_added:- none}"
 
 	say ''
-	say "  $USER_NAME is ready. Log in on the console: \"doas\" works for root,"
-	say '  "doelzaberi-gui" starts the Wayland session (weston).'
+	if [ "$WITH_GUI" = "yes" ]; then
+		say "  $USER_NAME is ready. Log in on the console: \"doas\" works for root,"
+		say '  "doelzaberi-gui" starts the niri Wayland session.'
+	else
+		say "  $USER_NAME is ready. Log in on the console: \"doas\" works for root,"
+		say '  "doelzaberi-gui" starts the Wayland session (weston).'
+	fi
 }
 
 create_runtime_dirs()
@@ -1083,6 +1258,9 @@ print_plan()
 	if [ "$CREATE_USER" = "yes" ]; then
 		say "  9. create the account $USER_NAME in the copy (uid >= 1000, home from /etc/skel)"
 	fi
+	if [ "$WITH_GUI" = "yes" ]; then
+		say ' 10. download and install the graphical software (niri, alacritty, ghostty, noctalia, nautilus)'
+	fi
 	rule
 }
 
@@ -1124,6 +1302,8 @@ main()
 	fi
 	validate_device
 	ask_account
+	ask_root_size
+	ask_gui
 	confirm_device
 
 	if [ "$DRY_RUN" = "yes" ]; then
@@ -1137,6 +1317,9 @@ main()
 	find_source
 	copy_kernel
 	copy_system
+	if [ "$WITH_GUI" = "yes" ]; then
+		install_gui
+	fi
 	create_account
 	create_runtime_dirs
 	write_fstab

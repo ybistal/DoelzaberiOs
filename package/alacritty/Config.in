@@ -1,0 +1,14 @@
+config BR2_PACKAGE_ALACRITTY
+	bool "alacritty"
+	depends on BR2_USE_MMU # fork()
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on BR2_INSTALL_LIBSTDCPP
+	select BR2_PACKAGE_FREETYPE
+	select BR2_PACKAGE_FONTCONFIG
+	select BR2_PACKAGE_LIBXKBCOMMON
+	select BR2_PACKAGE_WAYLAND
+	help
+	  Alacritty is a modern terminal emulator that comes with sensible
+	  defaults, but allows for extensive configuration.
+
+	  https://github.com/alacritty/alacritty

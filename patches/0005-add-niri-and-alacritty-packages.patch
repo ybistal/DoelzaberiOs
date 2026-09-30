@@ -1,0 +1,20 @@
+diff --git a/package/Config.in b/package/Config.in
+index dcca214383..26700f41e6 100644
+--- a/package/Config.in
++++ b/package/Config.in
+@@ -308,6 +308,7 @@ comment "Graphic applications"
+ 	source "package/cage/Config.in"
+ 	source "package/cog/Config.in"
+ 	source "package/drm-info/Config.in"
++	source "package/niri/Config.in"
+ 	source "package/flutter-packages/Config.in"
+ 	source "package/flutter-pi/Config.in"
+ 	source "package/foot/Config.in"
+@@ -394,6 +395,7 @@ endif
+ 	source "package/tekui/Config.in"
+ 	source "package/weston/Config.in"
+ 	source "package/x11r7/Config.in"
++	source "package/alacritty/Config.in"
+ 
+ comment "X applications"
+ 	depends on BR2_PACKAGE_XORG7

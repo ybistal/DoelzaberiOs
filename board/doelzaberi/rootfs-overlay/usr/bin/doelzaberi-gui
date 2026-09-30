@@ -3,7 +3,13 @@
 set -u
 
 PROG=${0##*/}
-COMPOSITOR=${DOELZABERI_COMPOSITOR:-weston}
+if [ -n "${DOELZABERI_COMPOSITOR:-}" ]; then
+	COMPOSITOR=$DOELZABERI_COMPOSITOR
+elif command -v niri >/dev/null 2>&1; then
+	COMPOSITOR=niri
+else
+	COMPOSITOR=weston
+fi
 PIXMAN=no
 CLIENT=
 
@@ -16,7 +22,8 @@ Usage:
   $PROG [options] [command [arguments]]
 
 Options:
-      --compositor=NAME   compositor to run (default: $COMPOSITOR)
+      --compositor=NAME   compositor to run (default: niri when installed,
+                          otherwise $COMPOSITOR)
   -p, --pixman            ask weston for the software renderer
   -h, --help              this help
 
@@ -81,7 +88,7 @@ fi
 export XDG_RUNTIME_DIR
 
 export XDG_SESSION_TYPE=wayland
-export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-weston}"
+export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-$COMPOSITOR}"
 export LIBSEAT_BACKEND="${LIBSEAT_BACKEND:-seatd}"
 export XKB_DEFAULT_LAYOUT="${XKB_DEFAULT_LAYOUT:-us,ru}"
 export XKB_DEFAULT_OPTIONS="${XKB_DEFAULT_OPTIONS:-grp:alt_shift_toggle}"

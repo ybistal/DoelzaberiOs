@@ -29,6 +29,13 @@ for _script in usr/bin/doelzaberi-gui etc/init.d/doelzaberi-runtime; do
 		chmod 0755 "$TARGET_DIR/$_script" || true
 done
 
+BOARD_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+for _bundle in "$BOARD_DIR/gui"/*.tar.gz; do
+	[ -e "$_bundle" ] || continue
+	mkdir -p "$TARGET_DIR/usr/share/doelzaberi/gui"
+	cp -f "$_bundle" "$TARGET_DIR/usr/share/doelzaberi/gui/"
+done
+
 cat > "$TARGET_DIR/usr/lib/os-release" <<'EOF'
 NAME="DoelzaberiOS"
 ID=doelzaberi
