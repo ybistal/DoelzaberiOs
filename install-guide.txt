@@ -1,4 +1,60 @@
 Ru:
-  когда загрузилось пишите doelzaberi-install и там короче откроется
-Eng:
-  once it's loaded type doelzaberi-install and it'll open from there
+  при первом запуске из лайф сиди 
+  login - root
+  password - doelzaberi
+  когда загрузилось пишите doelzaberi-install 
+  doelzaberi-install --list                  # просто показать список дисков
+  doelzaberi-install --dry-run /dev/nvme0n1  # показать план ничего не писать
+  doelzaberi-install --gui /dev/sda          # сразу с GUI (niri) без вопроса
+  doelzaberi-install --no-gui /dev/sda       # сразу без GUI
+  doelzaberi-install -y /dev/sda             # без лишних подтверждений
+  doelzaberi-install --user dunya -y /dev/sdc # пользователь dunya не спрашивать
+  doelzaberi-install --root-size 40G /dev/sda
+  doelzaberi-install --no-nvram /dev/sda     # не писать загрузочную запись в UEFI
+
+--esp-size 512M	размер EFI-раздела
+--root-size 40G	размер btrfs-раздела остальное свободно
+--source DIR	откуда брать boot/bzImage и boot/initrd (по умолчанию носитель с которого загрузились)
+--no-initrd	не ставить initrd не будет live RAM входа
+--no-nvram	не писать boot entry в прошивку (полезно для тестов)
+--force	продолжать даже если диск используется или это сам live-носитель
+--no-user	вообще не создавать учётку
+
+  doelzaberi-gui
+  rc-service seatd start     # управление устройствами (ввод/GPU)
+  rc-service dbus start      # D-Bus (niri его требует — собран с --features dbus)
+
+  doelzaberi-gui --compositor=niri      # явно указать композитор
+  doelzaberi-gui --compositor=weston    # вернуться к weston
+  doelzaberi-gui -p  
+
+
+eng:
+on first boot from live CD
+login - root
+password - doelzaberi
+once it has booted, type doelzaberi-install
+doelzaberi-install --list # just show the list of disks
+doelzaberi-install --dry-run /dev/nvme0n1 # show the plan without writing anything
+doelzaberi-install --gui /dev/sda # go straight to GUI (niri) without asking
+doelzaberi-install --no-gui /dev/sda # go straight to no-GUI
+doelzaberi-install -y /dev/sda # without extra confirmations
+doelzaberi-install --user dunya -y /dev/sdc # user dunya, don't ask
+doelzaberi-install --root-size 40G /dev/sda
+doelzaberi-install --no-nvram /dev/sda # don't write a boot entry to UEFI
+
+--esp-size 512M size of the EFI partition
+--root-size 40G size of the btrfs partition, the rest stays free
+--source DIR where to take boot/bzImage and boot/initrd from (default: the medium you booted from)
+--no-initrd don't install initrd; there will be no live RAM entry
+--no-nvram don't write a boot entry to the firmware (useful for testing)
+--force continue even if the disk is in use or it is the live medium itself
+--no-user don't create an account at all
+
+doelzaberi-gui
+rc-service seatd start # device management (input/GPU)
+rc-service dbus start # D-Bus (niri requires it — built with --features dbus)
+
+doelzaberi-gui --compositor=niri # explicitly specify the compositor
+doelzaberi-gui --compositor=weston # go back to weston
+doelzaberi-gui -p
