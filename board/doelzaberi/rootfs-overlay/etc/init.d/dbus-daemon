@@ -3,7 +3,7 @@
 description="D-Bus system message bus"
 
 command=/usr/bin/dbus-daemon
-command_args="--system --nofork"
+command_args="--system --nofork --nopidfile"
 command_background=true
 pidfile=/run/dbus-daemon.pid
 

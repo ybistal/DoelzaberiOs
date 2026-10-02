@@ -89,7 +89,9 @@ export XDG_RUNTIME_DIR
 
 export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-$COMPOSITOR}"
-export LIBSEAT_BACKEND="${LIBSEAT_BACKEND:-seatd}"
+if [ -n "${LIBSEAT_BACKEND:-}" ]; then
+	export LIBSEAT_BACKEND
+fi
 export XKB_DEFAULT_LAYOUT="${XKB_DEFAULT_LAYOUT:-us,ru}"
 export XKB_DEFAULT_OPTIONS="${XKB_DEFAULT_OPTIONS:-grp:alt_shift_toggle}"
 

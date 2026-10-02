@@ -3,7 +3,7 @@
 description="Seat management daemon"
 
 command=/usr/bin/seatd
-command_args="--group video"
+command_args="-g video"
 command_background=true
 pidfile=/run/seatd.pid
 
