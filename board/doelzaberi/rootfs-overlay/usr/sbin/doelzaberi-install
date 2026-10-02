@@ -1166,6 +1166,19 @@ write_fstab()
 	note 'the tmpfs entries of this medium are kept, so /run and /tmp stay in RAM'
 }
 
+uefi_entries()
+{
+	awk -v want="$1" '
+		/^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/ {
+			number = substr($1, 5, 4)
+			line = $0
+			sub(/^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]\*?[ \t]+/, "", line)
+			if (line == want || line ~ ("^" want "[ \t]")) {
+				print number
+			}
+		}'
+}
+
 install_bootloader()
 {
 	step 'Installing the GRUB EFI bootloader'
@@ -1221,14 +1234,46 @@ EOF
 	note "$ESP_PART:/boot/bzImage"
 
 	[ "$WITH_NVRAM" = "yes" ] || return 0
-	if [ ! -d /sys/firmware/efi/efivars ] || ! command -v efibootmgr >/dev/null 2>&1; then
-		note 'the firmware uses /EFI/BOOT/BOOTX64.EFI as fallback'
+	if [ ! -d /sys/firmware/efi ]; then
+		warn 'the firmware did not start in UEFI mode, no boot entry is created'
+		note 'the EFI partition has /EFI/BOOT/BOOTX64.EFI as a fallback'
 		return 0
 	fi
-	if efibootmgr -q -c -d "$DEVICE" -p 1 -L 'DoelzaberiOS' -l '\EFI\BOOT\BOOTX64.EFI'; then
-		note 'UEFI boot entry "DoelzaberiOS" added to the firmware'
-	else
-		warn 'efibootmgr could not add the boot entry, /EFI/BOOT/BOOTX64.EFI is the fallback'
+	if ! command -v efibootmgr >/dev/null 2>&1; then
+		warn 'efibootmgr is missing, no boot entry is created'
+		note 'the EFI partition has /EFI/BOOT/BOOTX64.EFI as a fallback'
+		return 0
+	fi
+	if [ -d /sys/firmware/efi/efivars ] &&
+		[ -z "$(ls -A /sys/firmware/efi/efivars 2>/dev/null)" ]; then
+		mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null || true
+	fi
+	for _old in $(efibootmgr 2>/dev/null | uefi_entries 'DoelzaberiOS'); do
+		if efibootmgr -q -b "$_old" -B 2>/dev/null; then
+			note "removed the older UEFI entry Boot$_old"
+		fi
+	done
+	if ! efibootmgr -q -c -d "$DEVICE" -p 1 -L 'DoelzaberiOS' \
+		-l '\EFI\BOOT\BOOTX64.EFI'; then
+		warn 'efibootmgr could not add the boot entry'
+		note 'the EFI partition has /EFI/BOOT/BOOTX64.EFI as a fallback'
+		return 0
+	fi
+	note 'UEFI boot entry "DoelzaberiOS" added to the firmware'
+	_new=$(efibootmgr 2>/dev/null | uefi_entries 'DoelzaberiOS' | tail -n 1)
+	if [ -n "$_new" ]; then
+		_order=$(efibootmgr 2>/dev/null |
+			awk -F': *' '/^BootOrder/ { print $2; exit }' | tr -d ' ')
+		_rest=$(printf '%s' "$_order" | awk -v n="$_new" -F, '
+			{ for (i = 1; i <= NF; i++)
+				if ($i != "" && $i != n)
+					printf "%s%s", (c++ ? "," : ""), $i }')
+		if [ -n "$_rest" ]; then
+			efibootmgr -q -o "$_new,$_rest" 2>/dev/null
+		else
+			efibootmgr -q -o "$_new" 2>/dev/null
+		fi
+		note "Boot$_new is first in the boot order"
 	fi
 }
 
@@ -1244,6 +1289,12 @@ finish_install()
 	fi
 	reread_parttable "$DEVICE"
 
+	if command -v sgdisk >/dev/null 2>&1; then
+		say ''
+		note "partition table of $DEVICE"
+		sgdisk --print "$DEVICE" 2>/dev/null | sed -n '3,12p'
+	fi
+
 	say ''
 	rule
 	say "DoelzaberiOS is installed on $DEVICE"
@@ -1253,7 +1304,9 @@ finish_install()
 	say ''
 	say 'Next steps:'
 	say '  1. remove the installation medium'
-	say '  2. reboot and pick the new disk in the firmware boot menu'
+	say '  2. reboot: the firmware boot menu should show "DoelzaberiOS"'
+	say '     as a new boot entry pointing to this disk; if it does not,'
+	say '     pick this disk directly in the firmware boot menu'
 	if [ "$CREATE_USER" = "yes" ]; then
 		say "  3. log in as $USER_NAME with the password you typed"
 		say "     \"doas\" gives root, \"doelzaberi-gui\" the Wayland session"
@@ -1309,6 +1362,21 @@ cleanup()
 	return 0
 }
 
+ensure_root()
+{
+	[ "$(id -u)" = "0" ] && return 0
+	_self=$(command -v "$0" 2>/dev/null || printf '%s' "$0")
+	if command -v doas >/dev/null 2>&1; then
+		say 'root rights are needed, restarting through doas'
+		exec doas "$_self" "$@"
+	fi
+	if command -v sudo >/dev/null 2>&1; then
+		say 'root rights are needed, restarting through sudo'
+		exec sudo "$_self" "$@"
+	fi
+	die 'this script must be run as root, and neither doas nor sudo is installed'
+}
+
 main()
 {
 	if [ "$LIST_ONLY" = "yes" ]; then
@@ -1316,7 +1384,7 @@ main()
 		exit 0
 	fi
 
-	[ "$(id -u)" = "0" ] || die 'this script must be run as root'
+	ensure_root "$@"
 	check_tools
 	mkdir -p "$WORKDIR" || die "cannot create $WORKDIR"
 	trap cleanup EXIT INT TERM
