@@ -730,8 +730,21 @@ ask_gui()
 	if [ "$WITH_GUI" != "ask" ]; then
 		return 0
 	fi
-	printf 'Do you want to install graphical software? (niri, alacritty, ghostty, noctalia, nautilus) [y/N] '
+	say ''
+	rule
+	say 'Graphical desktop'
+	say ''
+	say '  DoelzaberiOS can start a Wayland desktop session (niri, a tiling'
+	say '  compositor) with the alacritty terminal, instead of only the text'
+	say '  console.  You will start it after login with:  doelzaberi-gui'
+	say ''
+	say '    y  install the graphical desktop'
+	say '    n  keep the text-only system (faster, smaller)'
+	say ''
+	rule
+	printf 'Install the graphical desktop? [y/N] '
 	read -r _answer || _answer=
+	say ''
 	case "$_answer" in
 		y|Y|yes|YES|Yes) WITH_GUI=yes ;;
 		*)               WITH_GUI=no ;;
@@ -744,19 +757,15 @@ gui_configs()
 	mkdir -p "$_skel/.config/niri" "$_skel/.config/alacritty" \
 		"$_skel/.config/ghostty" "$_skel/.config/noctalia" \
 		"$_skel/.config/nautilus" || die 'cannot create the GUI config directories'
-	cat > "$_skel/.config/niri/config.kdl" <<EOF
-spawn-at-startup "noctalia"
-spawn-at-startup "alacritty"
-spawn-at-startup "ghostty"
-spawn-at-startup "nautilus"
-
-input {
-    xkb {
-        layout "us,ru"
-        options "grp:alt_shift_toggle"
-    }
-}
-EOF
+	# Only auto-start the applications that are actually installed, so niri
+	# never shows a blank screen because a missing program was started.
+	{
+		printf 'spawn-at-startup "alacritty"\n'
+		for _app in ghostty noctalia nautilus; do
+			[ -x "$WORKDIR/root/usr/bin/$_app" ] && printf 'spawn-at-startup "%s"\n' "$_app"
+		done
+		printf '\ninput {\n    xkb {\n        layout "us,ru"\n        options "grp:alt_shift_toggle"\n    }\n}\n'
+	} > "$_skel/.config/niri/config.kdl"
 	cat > "$_skel/.config/alacritty/alacritty.toml" <<EOF
 [font]
 size = 12
@@ -978,10 +987,25 @@ copy_system()
 	step 'Copying this running system onto the new root filesystem'
 	note 'this takes a few minutes'
 	_started=$(date +%s)
+	# The source tar can fail halfway (a file changing while it is read);
+	# without pipefail only the extracting tar's exit status is seen and a
+	# truncated copy would pass silently, losing commands.  Check both ends.
+	set -o pipefail
 	set -f
 	tar -C / -cpf - $(tar_excludes) . | tar -C "$WORKDIR/root" -xpf - || die 'cannot copy the system'
 	set +f
+	set +o pipefail
 	note "copied in $(( $(date +%s) - _started )) seconds"
+
+	# Verify the copy is complete enough to boot and to work as the main system.
+	_missing=
+	for _f in sbin/init usr/bin/sh usr/bin/mount usr/sbin/openrc-shutdown; do
+		[ -e "$WORKDIR/root/$_f" ] || _missing="$_missing $_f"
+	done
+	[ -x "$WORKDIR/root/sbin/init" ] || _missing="$_missing sbin/init(not-exec)"
+	if [ -n "$_missing" ]; then
+		warn "the copied system is incomplete, missing:$_missing"
+	fi
 }
 
 create_account()
@@ -1082,7 +1106,7 @@ create_account()
 		say '  "doelzaberi-gui" starts the niri Wayland session.'
 	else
 		say "  $USER_NAME is ready. Log in on the console: \"doas\" works for root,"
-		say '  "doelzaberi-gui" starts the Wayland session (weston).'
+		say '  "doelzaberi-gui" also starts the niri Wayland session.'
 	fi
 }
 
@@ -1259,7 +1283,7 @@ print_plan()
 		say "  9. create the account $USER_NAME in the copy (uid >= 1000, home from /etc/skel)"
 	fi
 	if [ "$WITH_GUI" = "yes" ]; then
-		say ' 10. download and install the graphical software (niri, alacritty, ghostty, noctalia, nautilus)'
+		say ' 10. set up the graphical desktop (niri Wayland session, alacritty terminal)'
 	fi
 	rule
 }

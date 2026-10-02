@@ -101,7 +101,10 @@ fi
 
 if [ -L /run/seatd.sock ] || [ -S /run/seatd.sock ]; then
 	:
-elif [ ! -S /run/seatd.sock ]; then
+elif [ "$(id -u)" = "0" ] && command -v rc-service >/dev/null 2>&1; then
+	rc-service seatd start >/dev/null 2>&1 || true
+fi
+if [ ! -L /run/seatd.sock ] && [ ! -S /run/seatd.sock ]; then
 	printf '%s: warning: seatd is not running (rc-service seatd start)\n' "$PROG" >&2
 fi
 
