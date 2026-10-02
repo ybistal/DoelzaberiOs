@@ -50,4 +50,7 @@ if [ -n "${DOELZABERI_HOME_URL:-}" ]; then
 fi
 ln -sfn ../usr/lib/os-release "$TARGET_DIR/etc/os-release"
 
+[ -d "$TARGET_DIR/home" ] || mkdir -p "$TARGET_DIR/home"
+chmod 0755 "$TARGET_DIR/home"
+
 exit 0
