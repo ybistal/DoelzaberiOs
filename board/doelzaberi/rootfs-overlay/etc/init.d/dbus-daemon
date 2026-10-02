@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+
+description="D-Bus system message bus"
+
+command=/usr/bin/dbus-daemon
+command_args="--system --nofork"
+command_background=true
+pidfile=/run/dbus-daemon.pid
+
+depend() {
+	need localmount
+}
+
+start_pre() {
+	checkpath --directory --mode 0755 /run/dbus
+	if [ ! -f /var/lib/dbus/machine-id ] && [ -x /usr/bin/dbus-uuidgen ]; then
+		dbus-uuidgen --ensure 2>/dev/null || true
+	fi
+}
