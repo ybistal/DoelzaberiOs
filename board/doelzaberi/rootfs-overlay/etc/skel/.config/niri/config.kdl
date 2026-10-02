@@ -3,9 +3,11 @@
 // replaces this file with the per-user setup under ~/.config/niri/.
 
 input {
-    xkb {
-        layout "us,ru"
-        options "grp:alt_shift_toggle"
+    keyboard {
+        xkb {
+            layout "us,ru"
+            options "grp:alt_shift_toggle"
+        }
     }
 }
 

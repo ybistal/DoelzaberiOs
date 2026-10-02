@@ -764,7 +764,7 @@ gui_configs()
 		for _app in ghostty noctalia nautilus; do
 			[ -x "$WORKDIR/root/usr/bin/$_app" ] && printf 'spawn-at-startup "%s"\n' "$_app"
 		done
-		printf '\ninput {\n    xkb {\n        layout "us,ru"\n        options "grp:alt_shift_toggle"\n    }\n}\n'
+		printf '\ninput {\n    keyboard {\n        xkb {\n            layout "us,ru"\n            options "grp:alt_shift_toggle"\n        }\n    }\n}\n'
 	} > "$_skel/.config/niri/config.kdl"
 	cat > "$_skel/.config/alacritty/alacritty.toml" <<EOF
 [font]
