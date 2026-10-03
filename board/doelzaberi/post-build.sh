@@ -24,7 +24,7 @@ done
 [ -f "$TARGET_DIR/etc/inittab" ] &&
 	sed -i 's|\(^console::respawn:/sbin/getty .*\) vt100$|\1 linux|' "$TARGET_DIR/etc/inittab" || true
 
-for _script in usr/bin/doelzaberi-gui etc/init.d/doelzaberi-runtime; do
+for _script in usr/bin/doelzaberi-gui etc/init.d/doelzaberi-runtime usr/sbin/autologin; do
 	[ -e "$TARGET_DIR/$_script" ] &&
 		chmod 0755 "$TARGET_DIR/$_script" || true
 done
