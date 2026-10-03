@@ -1141,6 +1141,14 @@ create_runtime_dirs()
 	[ -f "${_root}/etc/fstab" ] || warn "there is no /etc/fstab in ${_root}"
 	[ -x "${_root}/sbin/init" ] || warn "there is no /sbin/init in ${_root}"
 	note '/dev is mounted by the kernel, /proc by OpenRC, /run and /tmp from /etc/fstab'
+
+	# The live medium logs in as root without a password; the installed
+	# system must ask for one, so turn the automatic login back off.
+	if [ -f "${_root}/etc/conf.d/agetty.tty1" ]; then
+		sed -i 's|^agetty_options=.*|agetty_options="-L "|' \
+			"${_root}/etc/conf.d/agetty.tty1"
+		note 'automatic root login is disabled in the installed system'
+	fi
 }
 
 write_fstab()

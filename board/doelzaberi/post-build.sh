@@ -63,4 +63,24 @@ if [ -d "$TARGET_DIR/usr/lib" ]; then
 	done
 fi
 
+# C development files (headers, start files, static libc) so that tcc can
+# compile and link programs on the target itself.
+STAGING_DIR="$(dirname "$TARGET_DIR")/staging"
+if [ -d "$STAGING_DIR/usr/include" ]; then
+	mkdir -p "$TARGET_DIR/usr/include"
+	cp -a "$STAGING_DIR/usr/include/." "$TARGET_DIR/usr/include/"
+fi
+for _f in crt1.o crti.o crtn.o Scrt1.o rcrt1.o libc.a libm.a libpthread.a; do
+	if [ -f "$STAGING_DIR/usr/lib/$_f" ]; then
+		cp -a "$STAGING_DIR/usr/lib/$_f" "$TARGET_DIR/usr/lib/"
+	fi
+done
+
+# tcc's runtime support library (the *.a cleanup in target-finalize removed it)
+for _a in "$(dirname "$TARGET_DIR")"/build/tcc-*/libtcc1.a; do
+	[ -f "$_a" ] || continue
+	mkdir -p "$TARGET_DIR/usr/lib/tcc"
+	cp -f "$_a" "$TARGET_DIR/usr/lib/tcc/libtcc1.a"
+done
+
 exit 0

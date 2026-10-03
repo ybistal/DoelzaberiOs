@@ -1,0 +1,5 @@
+config BR2_PACKAGE_TCC
+	bool "tcc"
+	depends on BR2_USE_MMU
+	help
+	  Tiny C Compiler, a small and fast C compiler.

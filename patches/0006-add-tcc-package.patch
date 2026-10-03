@@ -1,0 +1,12 @@
+diff --git a/package/Config.in b/package/Config.in
+index dcca214383..6891cd73af 100644
+--- a/package/Config.in
++++ b/package/Config.in
+@@ -199,6 +199,7 @@ menu "Development tools"
+ 	source "package/ripgrep/Config.in"
+ 	source "package/sed/Config.in"
+ 	source "package/subversion/Config.in"
++	source "package/tcc/Config.in"
+ 	source "package/tig/Config.in"
+ 	source "package/tree/Config.in"
+ 	source "package/unifdef/Config.in"
