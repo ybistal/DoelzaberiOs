@@ -53,4 +53,14 @@ ln -sfn ../usr/lib/os-release "$TARGET_DIR/etc/os-release"
 [ -d "$TARGET_DIR/home" ] || mkdir -p "$TARGET_DIR/home"
 chmod 0755 "$TARGET_DIR/home"
 
+# mesa 26 puts the megadriver libgallium in /usr/lib, but EGL/GBM look for it
+# in /usr/lib/dri; link it there so the GL renderer can be created.
+if [ -d "$TARGET_DIR/usr/lib" ]; then
+	mkdir -p "$TARGET_DIR/usr/lib/dri"
+	for _g in "$TARGET_DIR"/usr/lib/libgallium-*.so; do
+		[ -e "$_g" ] || continue
+		ln -sfn "../${_g##*/}" "$TARGET_DIR/usr/lib/dri/${_g##*/}"
+	done
+fi
+
 exit 0
