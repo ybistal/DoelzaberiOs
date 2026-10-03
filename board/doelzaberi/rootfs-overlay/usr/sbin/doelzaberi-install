@@ -1204,6 +1204,10 @@ menuentry "doelzaberi (btrfs, persistent) - safe graphics (nomodeset)" {
 	linux /boot/bzImage root=$ROOT_PARAM rootwait rootfstype=btrfs console=tty1 loglevel=7 nomodeset
 }
 
+menuentry "doelzaberi (btrfs, persistent) - no nouveau (NVIDIA hang)" {
+	linux /boot/bzImage root=$ROOT_PARAM rootwait rootfstype=btrfs console=tty1 loglevel=7 nouveau.modeset=0
+}
+
 menuentry "doelzaberi (btrfs, persistent) - by partition name" {
 	linux /boot/bzImage root=PARTLABEL=$BTRFS_LABEL rootwait rootfstype=btrfs console=tty1 loglevel=7
 }
