@@ -1,0 +1,7 @@
+config BR2_PACKAGE_ZIG
+	bool "zig"
+	depends on BR2_USE_MMU
+	help
+	  Zig is a general purpose programming language and toolchain.
+	  The toolchain ships a complete C and C++ compiler (zig cc and
+	  zig c++), so programs can be built directly on the target.

@@ -1,0 +1,12 @@
+diff --git a/package/Config.in b/package/Config.in
+index 6891cd73af..0000000000 100644
+--- a/package/Config.in
++++ b/package/Config.in
+@@ -205,6 +205,7 @@ menu "Development tools"
+ 	source "package/unifdef/Config.in"
+ 	source "package/yasm/Config.in"
+ 	source "package/yq/Config.in"
++	source "package/zig/Config.in"
+ endmenu
+ 
+ menu "Filesystem and flash utilities"
