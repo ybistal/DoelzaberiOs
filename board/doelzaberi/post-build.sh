@@ -83,4 +83,21 @@ for _a in "$(dirname "$TARGET_DIR")"/build/tcc-*/libtcc1.a; do
 	cp -f "$_a" "$TARGET_DIR/usr/lib/tcc/libtcc1.a"
 done
 
+# buildroot deliberately deletes the cmake/cpack binaries from the target
+for _cm in cmake cpack; do
+	_src="$(ls -d "$(dirname "$TARGET_DIR")"/build/cmake-*/bin/$_cm 2>/dev/null | head -n1)"
+	[ -n "$_src" ] &&
+		install -D -m 0755 "$_src" "$TARGET_DIR/usr/bin/$_cm" || true
+done
+
+# buildroot installs only a reduced set of cmake modules; copy the full set
+_cmbuild="$(ls -d "$(dirname "$TARGET_DIR")"/build/cmake-*/ 2>/dev/null | head -n1)"
+_cmshare="$(ls -d "$TARGET_DIR"/usr/share/cmake-*/ 2>/dev/null | head -n1)"
+if [ -n "$_cmbuild" ] && [ -n "$_cmshare" ]; then
+	for _d in Modules Templates; do
+		[ -d "$_cmbuild/$_d" ] &&
+			cp -a "$_cmbuild/$_d/." "$_cmshare/$_d/" || true
+	done
+fi
+
 exit 0
