@@ -1,7 +1,3 @@
-// niri default configuration for DoelzaberiOS.
-// The installer (doelzaberi-install, "install the graphical desktop")
-// replaces this file with the per-user setup under ~/.config/niri/.
-
 input {
     keyboard {
         xkb {

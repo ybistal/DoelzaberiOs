@@ -757,8 +757,6 @@ gui_configs()
 	mkdir -p "$_skel/.config/niri" "$_skel/.config/alacritty" \
 		"$_skel/.config/ghostty" "$_skel/.config/noctalia" \
 		"$_skel/.config/nautilus" || die 'cannot create the GUI config directories'
-	# Only auto-start the applications that are actually installed, so niri
-	# never shows a blank screen because a missing program was started.
 	{
 		printf 'spawn-at-startup "alacritty"\n'
 		for _app in ghostty noctalia nautilus; do
@@ -987,9 +985,6 @@ copy_system()
 	step 'Copying this running system onto the new root filesystem'
 	note 'this takes a few minutes'
 	_started=$(date +%s)
-	# The source tar can fail halfway (a file changing while it is read);
-	# without pipefail only the extracting tar's exit status is seen and a
-	# truncated copy would pass silently, losing commands.  Check both ends.
 	set -o pipefail
 	set -f
 	tar -C / -cpf - $(tar_excludes) . | tar -C "$WORKDIR/root" -xpf - || die 'cannot copy the system'
@@ -997,7 +992,6 @@ copy_system()
 	set +o pipefail
 	note "copied in $(( $(date +%s) - _started )) seconds"
 
-	# Verify the copy is complete enough to boot and to work as the main system.
 	_missing=
 	for _f in sbin/init usr/bin/sh usr/bin/mount usr/sbin/openrc-shutdown; do
 		[ -e "$WORKDIR/root/$_f" ] || _missing="$_missing $_f"
@@ -1142,8 +1136,6 @@ create_runtime_dirs()
 	[ -x "${_root}/sbin/init" ] || warn "there is no /sbin/init in ${_root}"
 	note '/dev is mounted by the kernel, /proc by OpenRC, /run and /tmp from /etc/fstab'
 
-	# The live medium logs in as root without a password; the installed
-	# system must ask for one, so turn the automatic login back off.
 	if [ -f "${_root}/etc/conf.d/agetty.tty1" ]; then
 		sed -i 's|^agetty_options=.*|agetty_options="-L "|' \
 			"${_root}/etc/conf.d/agetty.tty1"

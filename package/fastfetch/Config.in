@@ -1,6 +1,6 @@
 config BR2_PACKAGE_FASTFETCH
 	bool "fastfetch"
-	depends on BR2_USE_MMU # fork()
+	depends on BR2_USE_MMU
 	help
 	  Fastfetch is a neofetch-like tool for fetching system
 	  information and displaying it in a pretty way. It is

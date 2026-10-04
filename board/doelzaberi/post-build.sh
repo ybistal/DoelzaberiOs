@@ -53,8 +53,6 @@ ln -sfn ../usr/lib/os-release "$TARGET_DIR/etc/os-release"
 [ -d "$TARGET_DIR/home" ] || mkdir -p "$TARGET_DIR/home"
 chmod 0755 "$TARGET_DIR/home"
 
-# mesa 26 puts the megadriver libgallium in /usr/lib, but EGL/GBM look for it
-# in /usr/lib/dri; link it there so the GL renderer can be created.
 if [ -d "$TARGET_DIR/usr/lib" ]; then
 	mkdir -p "$TARGET_DIR/usr/lib/dri"
 	for _g in "$TARGET_DIR"/usr/lib/libgallium-*.so; do
@@ -63,8 +61,6 @@ if [ -d "$TARGET_DIR/usr/lib" ]; then
 	done
 fi
 
-# C development files (headers, start files, static libc) so that tcc can
-# compile and link programs on the target itself.
 STAGING_DIR="$(dirname "$TARGET_DIR")/staging"
 if [ -d "$STAGING_DIR/usr/include" ]; then
 	mkdir -p "$TARGET_DIR/usr/include"
@@ -76,21 +72,18 @@ for _f in crt1.o crti.o crtn.o Scrt1.o rcrt1.o libc.a libm.a libpthread.a; do
 	fi
 done
 
-# tcc's runtime support library (the *.a cleanup in target-finalize removed it)
 for _a in "$(dirname "$TARGET_DIR")"/build/tcc-*/libtcc1.a; do
 	[ -f "$_a" ] || continue
 	mkdir -p "$TARGET_DIR/usr/lib/tcc"
 	cp -f "$_a" "$TARGET_DIR/usr/lib/tcc/libtcc1.a"
 done
 
-# buildroot deliberately deletes the cmake/cpack binaries from the target
 for _cm in cmake cpack; do
 	_src="$(ls -d "$(dirname "$TARGET_DIR")"/build/cmake-*/bin/$_cm 2>/dev/null | head -n1)"
 	[ -n "$_src" ] &&
 		install -D -m 0755 "$_src" "$TARGET_DIR/usr/bin/$_cm" || true
 done
 
-# buildroot installs only a reduced set of cmake modules; copy the full set
 _cmbuild="$(ls -d "$(dirname "$TARGET_DIR")"/build/cmake-*/ 2>/dev/null | head -n1)"
 _cmshare="$(ls -d "$TARGET_DIR"/usr/share/cmake-*/ 2>/dev/null | head -n1)"
 if [ -n "$_cmbuild" ] && [ -n "$_cmshare" ]; then
@@ -98,6 +91,13 @@ if [ -n "$_cmbuild" ] && [ -n "$_cmshare" ]; then
 		[ -d "$_cmbuild/$_d" ] &&
 			cp -a "$_cmbuild/$_d/." "$_cmshare/$_d/" || true
 	done
+fi
+
+_fw="$(ls -d "$(dirname "$TARGET_DIR")"/build/linux-firmware-*/nvidia 2>/dev/null | head -n1)"
+if [ -d "$_fw" ]; then
+	mkdir -p "$TARGET_DIR/lib/firmware/nvidia"
+	cp -a "$_fw/." "$TARGET_DIR/lib/firmware/nvidia/"
+	rm -rf "$TARGET_DIR"/lib/firmware/nvidia/tegra*
 fi
 
 exit 0
