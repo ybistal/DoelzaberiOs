@@ -1,0 +1,6 @@
+config BR2_PACKAGE_HYPRLAND_PROTOCOLS
+	bool "hyprland-protocols"
+	help
+	  Wayland protocol extensions used by the Hyprland compositor.
+
+	  https://github.com/hyprwm/hyprland-protocols

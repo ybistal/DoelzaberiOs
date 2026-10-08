@@ -1,0 +1,7 @@
+config BR2_PACKAGE_HYPRUTILS
+	bool "hyprutils"
+	depends on BR2_INSTALL_LIBSTDCPP
+	help
+	  Small C++ library for utilities used across the Hypr* ecosystem.
+
+	  https://github.com/hyprwm/hyprutils

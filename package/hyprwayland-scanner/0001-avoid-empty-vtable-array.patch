@@ -1,0 +1,19 @@
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -656,11 +656,16 @@
+ )#",
+                               IFACE_VTABLE_NAME);
+ 
++        bool _vtableEmpty = true;
+         for (auto& rq : (clientCode ? iface.events : iface.requests)) {
+             const auto REQUEST_NAME = camelize(std::string{"_"} + "C_" + IFACE_NAME + "_" + rq.name);
+             SOURCE += std::format("    (void*){},\n", REQUEST_NAME);
++            _vtableEmpty = false;
+         }
+ 
++        if (_vtableEmpty)
++            SOURCE += "    nullptr,\n";
++
+         SOURCE += "};\n";
+ 
+         // create events

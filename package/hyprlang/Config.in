@@ -1,0 +1,8 @@
+config BR2_PACKAGE_HYPRLANG
+	bool "hyprlang"
+	depends on BR2_INSTALL_LIBSTDCPP
+	select BR2_PACKAGE_HYPRUTILS
+	help
+	  A library to parse hypr config files.
+
+	  https://github.com/hyprwm/hyprlang

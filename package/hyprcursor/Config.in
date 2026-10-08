@@ -1,0 +1,12 @@
+config BR2_PACKAGE_HYPRCURSOR
+	bool "hyprcursor"
+	depends on BR2_INSTALL_LIBSTDCPP
+	select BR2_PACKAGE_CAIRO
+	select BR2_PACKAGE_HYPRLANG
+	select BR2_PACKAGE_LIBRSVG
+	select BR2_PACKAGE_LIBZIP
+	select BR2_PACKAGE_TOMLPLUSPLUS
+	help
+	  A library and toolkit for the Hyprland cursor format.
+
+	  https://github.com/hyprwm/hyprcursor

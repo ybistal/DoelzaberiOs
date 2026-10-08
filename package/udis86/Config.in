@@ -1,0 +1,7 @@
+config BR2_PACKAGE_UDIS86
+	bool "udis86"
+	help
+	  udis86 is a disassembler library for the x86 and x86-64
+	  instruction sets.
+
+	  https://github.com/canihavesomecoffee/udis86

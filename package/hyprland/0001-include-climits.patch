@@ -1,0 +1,24 @@
+--- a/src/helpers/MiscFunctions.cpp
++++ b/src/helpers/MiscFunctions.cpp
+@@ -1,4 +1,5 @@
+ #include "MiscFunctions.hpp"
++#include <climits>
+ #include "../defines.hpp"
+ #include <algorithm>
+ #include "../Compositor.hpp"
+ #include "../managers/TokenManager.hpp"
+ #include "Monitor.hpp"
+ #include "../config/ConfigManager.hpp"
+ #include "fs/FsUtils.hpp"
+--- a/src/helpers/Monitor.cpp
++++ b/src/helpers/Monitor.cpp
+@@ -1,4 +1,5 @@
+ #include "Monitor.hpp"
++#include <climits>
+ #include "MiscFunctions.hpp"
+ #include "../macros.hpp"
+ #include "math/Math.hpp"
+ #include "../protocols/ColorManagement.hpp"
+ #include "sync/SyncReleaser.hpp"
+ #include "../Compositor.hpp"
+ #include "../config/ConfigValue.hpp"

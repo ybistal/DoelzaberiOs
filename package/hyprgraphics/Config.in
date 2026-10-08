@@ -1,0 +1,15 @@
+config BR2_PACKAGE_HYPRGRAPHICS
+	bool "hyprgraphics"
+	depends on BR2_INSTALL_LIBSTDCPP
+	select BR2_PACKAGE_CAIRO
+	select BR2_PACKAGE_CAIRO_PNG
+	select BR2_PACKAGE_HYPRUTILS
+	select BR2_PACKAGE_JPEG
+	select BR2_PACKAGE_LIBPNG
+	select BR2_PACKAGE_PANGO
+	select BR2_PACKAGE_WEBP
+	help
+	  Small C++ library for graphics and resource utilities used across
+	  the Hypr* ecosystem.
+
+	  https://github.com/hyprwm/hyprgraphics

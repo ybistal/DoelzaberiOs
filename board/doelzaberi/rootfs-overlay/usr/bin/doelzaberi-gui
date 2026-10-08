@@ -5,6 +5,8 @@ set -u
 PROG=${0##*/}
 if [ -n "${DOELZABERI_COMPOSITOR:-}" ]; then
 	COMPOSITOR=$DOELZABERI_COMPOSITOR
+elif command -v Hyprland >/dev/null 2>&1; then
+	COMPOSITOR=Hyprland
 elif command -v niri >/dev/null 2>&1; then
 	COMPOSITOR=niri
 else
@@ -22,8 +24,8 @@ Usage:
   $PROG [options] [command [arguments]]
 
 Options:
-      --compositor=NAME   compositor to run (default: niri when installed,
-                          otherwise $COMPOSITOR)
+      --compositor=NAME   compositor to run (default: Hyprland when installed,
+                          otherwise niri, then $COMPOSITOR)
   -p, --pixman            ask weston for the software renderer
   -h, --help              this help
 

@@ -1,0 +1,21 @@
+diff --git a/package/Config.in b/package/Config.in
+index 26700f41e6..f0a1b2c3d4 100644
+--- a/package/Config.in
++++ b/package/Config.in
+@@ -337,5 +337,15 @@ comment "Graphic applications"
+ 	source "package/tesseract-ocr/Config.in"
+ 	source "package/tinifier/Config.in"
+ 	source "package/wmenu/Config.in"
++	source "package/aquamarine/Config.in"
++	source "package/hyprcursor/Config.in"
++	source "package/hyprgraphics/Config.in"
++	source "package/hyprland/Config.in"
++	source "package/hyprland-protocols/Config.in"
++	source "package/hyprlang/Config.in"
++	source "package/hyprutils/Config.in"
++	source "package/hyprwayland-scanner/Config.in"
++	source "package/tomlplusplus/Config.in"
++	source "package/udis86/Config.in"
+ 
+ comment "Graphic libraries"
+

@@ -1,0 +1,7 @@
+config BR2_PACKAGE_HYPRWAYLAND_SCANNER
+	bool
+	help
+	  Wayland protocol scanner for the Hypr* ecosystem. This is a host
+	  only tool used to generate C++ protocol bindings at build time.
+
+	  https://github.com/hyprwm/hyprwayland-scanner

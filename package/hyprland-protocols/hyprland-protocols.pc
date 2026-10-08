@@ -1,0 +1,7 @@
+prefix=/usr
+datarootdir=${prefix}/share
+pkgdatadir=${pc_sysrootdir}${datarootdir}/hyprland-protocols
+
+Name: Hyprland Protocols
+Description: Hyprland protocol files
+Version: 0.6.2

@@ -1,0 +1,23 @@
+config BR2_PACKAGE_AQUAMARINE
+	bool "aquamarine"
+	depends on BR2_INSTALL_LIBSTDCPP
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on BR2_USE_MMU
+	select BR2_PACKAGE_HYPRUTILS
+	select BR2_PACKAGE_HWDATA
+	select BR2_PACKAGE_LIBDISPLAY_INFO
+	select BR2_PACKAGE_LIBDRM
+	select BR2_PACKAGE_LIBINPUT
+	select BR2_PACKAGE_LIBXKBCOMMON
+	select BR2_PACKAGE_MESA3D
+	select BR2_PACKAGE_MESA3D_GBM
+	select BR2_PACKAGE_PIXMAN
+	select BR2_PACKAGE_SEATD
+	select BR2_PACKAGE_WAYLAND
+	select BR2_PACKAGE_WAYLAND_PROTOCOLS
+	select BR2_PACKAGE_HOST_HYPRWAYLAND_SCANNER
+	help
+	  A very light linux rendering backend library. It is the rendering
+	  and DRM backend used by the Hyprland compositor.
+
+	  https://github.com/hyprwm/aquamarine

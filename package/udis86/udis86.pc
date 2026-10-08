@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: udis86
+Description: Disassembler library for x86 and x86-64
+Version: 1.7.2
+Libs: -L${libdir} -ludis86
+Cflags: -I${includedir}

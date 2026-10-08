@@ -1,0 +1,8 @@
+prefix=/usr
+exec_prefix=${prefix}
+includedir=${prefix}/include
+
+Name: tomlplusplus
+Description: Header-only TOML config file parser and serializer for C++17
+Version: 3.4.0
+Cflags: -I${includedir}
