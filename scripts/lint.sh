@@ -145,6 +145,16 @@ else
 	bad 'board/doelzaberi/rootfs-overlay/etc/doelzaberi/compositor is missing'
 fi
 
+echo '== hyprgraphics dependencies'
+if grep -qE '^HYPRGRAPHICS_DEPENDENCIES = .*\bfile\b' package/hyprgraphics/hyprgraphics.mk &&
+	grep -q '^BR2_PACKAGE_FILE=y' configs/DoelzaberiOS_defconfig &&
+	grep -q '^BR2_PACKAGE_FILE=y' configs/DoelzaberiOS_glibc_defconfig
+then
+	ok 'libmagic is a dependency of hyprgraphics in both variants'
+else
+	bad 'hyprgraphics needs file (libmagic) and both defconfigs must select it'
+fi
+
 echo
 if [ "$FAILED" = 0 ]; then
 	echo 'lint: everything passed'
