@@ -9,6 +9,7 @@ REPO_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 TREE=$REPO_DIR/buildroot
 JOBS=$(nproc 2>/dev/null || echo 4)
 HOME_URL=${DOELZABERI_HOME_URL:-}
+LIBC=${DOELZABERI_LIBC:-musl}
 CLEAN=no
 CONFIGURE_ONLY=no
 
@@ -22,15 +23,20 @@ Usage: ./build.sh [options]
   -b DIR   Buildroot tree to use or create   (default: <repo>/buildroot)
   -r REF   Buildroot revision to check out   (default: the pinned commit)
   -j N     parallel jobs                     (default: all cores)
+  -l LIBC  libc of the images: musl or glibc  (default: musl)
   -u URL   HOME_URL for /usr/lib/os-release  (default: none)
   -c       clean: remove the output/ of the tree first
   -n       configure only, do not build the images
   -h       this help
 
-Environment: BUILDROOT_REPO, BUILDROOT_REF, BR2_DL_DIR.
+Environment: BUILDROOT_REPO, BUILDROOT_REF, BR2_DL_DIR, DOELZABERI_LIBC.
+
+The musl build uses <tree>/output, the glibc build <tree>/output-glibc, so
+the two can be built one after the other without touching each other.
 
 Examples:
   ./build.sh                       # everything, with all cores
+  ./build.sh -l glibc              # the glibc variant
   ./build.sh -j 8 -u https://example.org/doelzaberi
   ./build.sh -n                    # only configure (checks the defconfig)
 EOF
@@ -41,6 +47,7 @@ while [ $# -gt 0 ]; do
 		-b) [ $# -ge 2 ] || die "-b needs a directory"; TREE=$2; shift 2 ;;
 		-r) [ $# -ge 2 ] || die "-r needs a revision"; BUILDROOT_REF=$2; shift 2 ;;
 		-j) [ $# -ge 2 ] || die "-j needs a number"; JOBS=$2; shift 2 ;;
+		-l) [ $# -ge 2 ] || die "-l needs a libc"; LIBC=$2; shift 2 ;;
 		-u) [ $# -ge 2 ] || die "-u needs a URL"; HOME_URL=$2; shift 2 ;;
 		-c) CLEAN=yes; shift ;;
 		-n) CONFIGURE_ONLY=yes; shift ;;
@@ -48,6 +55,22 @@ while [ $# -gt 0 ]; do
 		*) die "unknown option '$1' (try --help)" ;;
 	esac
 done
+
+case "$LIBC" in
+	musl)
+		DEFCONFIG=DoelzaberiOS_defconfig
+		OUTPUT=
+		IMAGE_SUFFIX=
+		;;
+	glibc)
+		DEFCONFIG=DoelzaberiOS_glibc_defconfig
+		OUTPUT=output-glibc
+		IMAGE_SUFFIX=-glibc
+		;;
+	*)
+		die "'$LIBC' is not a libc - use musl or glibc"
+		;;
+esac
 
 case "$TREE" in
 	/*) ;;
@@ -62,6 +85,7 @@ done
 	die "scripts/apply-to-buildroot.sh is missing or not executable"
 
 step "Buildroot tree: $TREE"
+printf '  libc %s, defconfig %s, output %s\n' "$LIBC" "$DEFCONFIG" "${OUTPUT:-output}"
 if [ -d "$TREE/.git" ]; then
 	printf '  reusing the existing checkout\n'
 	git -C "$TREE" remote set-url origin "$BUILDROOT_REPO" 2>/dev/null ||
@@ -82,8 +106,8 @@ step "Applying DoelzaberiOS"
 "$REPO_DIR/scripts/apply-to-buildroot.sh" "$TREE"
 
 if [ "$CLEAN" = "yes" ]; then
-	step "Removing $TREE/output"
-	rm -rf "$TREE/output"
+	step "Removing $TREE/${OUTPUT:-output}"
+	rm -rf "$TREE/${OUTPUT:-output}"
 fi
 
 if [ -n "$HOME_URL" ]; then
@@ -91,24 +115,32 @@ if [ -n "$HOME_URL" ]; then
 	printf '\nHOME_URL=%s goes into /usr/lib/os-release\n' "$HOME_URL"
 fi
 
-step "Configuring (make DoelzaberiOS_defconfig)"
-make -C "$TREE" DoelzaberiOS_defconfig
+if [ -n "$OUTPUT" ]; then
+	MAKE_O="O=$TREE/$OUTPUT"
+	IMAGES_DIR="$TREE/$OUTPUT/images"
+else
+	MAKE_O=
+	IMAGES_DIR="$TREE/output/images"
+fi
+
+step "Configuring (make $DEFCONFIG, libc $LIBC)"
+make -C "$TREE" $MAKE_O "$DEFCONFIG"
 
 if [ "$CONFIGURE_ONLY" = "yes" ]; then
 	step "Done (configure only)"
-	printf '  cd %s && make -j%s\n' "$TREE" "$JOBS"
+	printf '  cd %s && make %s-j%s\n' "$TREE" "${MAKE_O:+$MAKE_O }" "$JOBS"
 	exit 0
 fi
 
 step "Building with $JOBS jobs"
-make -C "$TREE" -j"$JOBS"
+make -C "$TREE" $MAKE_O -j"$JOBS"
 
-step "Images in $TREE/output/images"
-for _image in doelzaberi.iso doelzaberi-sd.img bzImage rootfs.cpio; do
-	[ -f "$TREE/output/images/$_image" ] &&
-		ls -l "$TREE/output/images/$_image" || true
+step "Images in $IMAGES_DIR"
+for _image in "doelzaberi${IMAGE_SUFFIX}.iso" "doelzaberi${IMAGE_SUFFIX}-sd.img" bzImage rootfs.cpio; do
+	[ -f "$IMAGES_DIR/$_image" ] &&
+		ls -l "$IMAGES_DIR/$_image" || true
 done
 printf '\nsha256:\n'
-(cd "$TREE/output/images" && for _image in doelzaberi.iso doelzaberi-sd.img bzImage; do
+(cd "$IMAGES_DIR" && for _image in "doelzaberi${IMAGE_SUFFIX}.iso" "doelzaberi${IMAGE_SUFFIX}-sd.img" bzImage; do
 	[ -f "$_image" ] && sha256sum "$_image"
 done) || true

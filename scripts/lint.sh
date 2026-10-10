@@ -103,6 +103,48 @@ else
 	bad 'NVMe support is missing'
 fi
 
+echo '== the libc variants'
+for _defconfig in configs/DoelzaberiOS_defconfig configs/DoelzaberiOS_glibc_defconfig; do
+	if [ -f "$_defconfig" ]; then
+		ok "$_defconfig"
+	else
+		bad "$_defconfig is missing"
+	fi
+done
+if grep -q '^BR2_TOOLCHAIN_BUILDROOT_MUSL=y' configs/DoelzaberiOS_defconfig &&
+	grep -q '^BR2_TOOLCHAIN_BUILDROOT_GLIBC=y' configs/DoelzaberiOS_glibc_defconfig
+then
+	ok 'the defconfigs select musl and glibc'
+else
+	bad 'the defconfigs do not select musl and glibc'
+fi
+_drift=$(diff -u configs/DoelzaberiOS_defconfig configs/DoelzaberiOS_glibc_defconfig |
+	grep -E '^[+-][^+-]' |
+	grep -vE 'TOOLCHAIN_BUILDROOT_(MUSL|GLIBC)|GENERATE_LOCALE|MESA3D_GALLIUM_DRIVER_R600' ||
+	true)
+if [ -z "$_drift" ]; then
+	ok 'the defconfigs differ only in the libc and the extra drivers'
+else
+	bad 'the defconfigs have drifted apart'
+	printf '%s\n' "$_drift" >&2
+fi
+
+echo '== the Wayland session'
+for _compositor in hyprland niri; do
+	if grep -q "$_compositor" board/doelzaberi/rootfs-overlay/usr/sbin/doelzaberi-install &&
+		grep -q "$_compositor" board/doelzaberi/rootfs-overlay/usr/bin/doelzaberi-gui
+	then
+		ok "$_compositor is offered by the installer and started by doelzaberi-gui"
+	else
+		bad "$_compositor is not handled by the installer and doelzaberi-gui"
+	fi
+done
+if grep -qE '^hyprland$' board/doelzaberi/rootfs-overlay/etc/doelzaberi/compositor; then
+	ok 'the compositor of a fresh system is hyprland'
+else
+	bad 'board/doelzaberi/rootfs-overlay/etc/doelzaberi/compositor is missing'
+fi
+
 echo
 if [ "$FAILED" = 0 ]; then
 	echo 'lint: everything passed'

@@ -23,6 +23,9 @@ FORCE=no
 WITH_INITRD=yes
 WITH_NVRAM=yes
 WITH_GUI=ask
+COMPOSITOR=hyprland
+COMPOSITOR_GIVEN=no
+COMPOSITOR_DIR=/etc/doelzaberi
 GUI_DIR=/usr/share/doelzaberi/gui
 GUI_BASE_URL=
 CREATE_USER=ask
@@ -177,6 +180,23 @@ valid_user_name()
 	esac
 }
 
+compositor_binary()
+{
+	case "$1" in
+	hyprland) printf 'Hyprland' ;;
+	niri)     printf 'niri' ;;
+	*)        printf '%s' "$1" ;;
+	esac
+}
+
+valid_compositor()
+{
+	case "$1" in
+	hyprland | niri) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
 read_secret()
 {
 	SECRET=
@@ -288,9 +308,11 @@ Options:
       --esp-size SIZE  size of the EFI partition (default: $ESP_SIZE, also 512M, 1G, ...)
       --root-size SIZE size of the root partition, for example 40G
                        (default: ask, the whole remaining space is offered)
-      --gui            install the graphical software (niri, alacritty,
-                       ghostty, noctalia, nautilus) and start it at login
+      --gui            install the graphical software and start the session
+                       at login
       --no-gui         do not install the graphical software (default: ask)
+      --compositor=NAME  Wayland compositor of the installed session:
+                       hyprland or niri (default: ask, $COMPOSITOR is offered)
       --source DIR     directory with boot/bzImage and boot/initrd
                        (default: the medium this system was booted from)
       --no-initrd      do not install the initrd, so there is no "live, RAM" entry
@@ -337,6 +359,11 @@ while [ $# -gt 0 ]; do
 		--no-nvram)    WITH_NVRAM=no ;;
 		--gui)         WITH_GUI=yes ;;
 		--no-gui)      WITH_GUI=no ;;
+		--compositor)  [ $# -ge 2 ] || die '--compositor needs a name'
+		               COMPOSITOR=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
+		               COMPOSITOR_GIVEN=yes; WITH_GUI=yes; shift ;;
+		--compositor=*) COMPOSITOR=$(printf '%s' "${1#*=}" | tr 'A-Z' 'a-z')
+		               COMPOSITOR_GIVEN=yes; WITH_GUI=yes ;;
 		-h|--help)     usage; exit 0 ;;
 		--source)      [ $# -ge 2 ] || die '--source needs a directory'
 		               SOURCE=$2; shift ;;
@@ -353,6 +380,10 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+
+if [ "$COMPOSITOR_GIVEN" = "yes" ] && ! valid_compositor "$COMPOSITOR"; then
+	die "'$COMPOSITOR' is not a compositor - use hyprland or niri"
+fi
 
 ask_password()
 {
@@ -671,7 +702,7 @@ confirm_device()
 	say "  $ESP_LABEL         ${ESP_SIZE}      FAT32   GRUB EFI bootloader, kernel, initrd"
 	say "  $BTRFS_LABEL   ${ROOT_SIZE:-all remaining space}   btrfs   this system, as the new root filesystem"
 	if [ "$WITH_GUI" = "yes" ]; then
-		say "  graphical software   niri, alacritty, ghostty, noctalia, nautilus"
+		say "  graphical software   $COMPOSITOR, alacritty, ghostty, noctalia, nautilus"
 	fi
 	rule
 	printf 'Type the disk name to confirm (%s): ' "$DISK_NAME"
@@ -734,7 +765,7 @@ ask_gui()
 	rule
 	say 'Graphical desktop'
 	say ''
-	say '  DoelzaberiOS can start a Wayland desktop session (niri, a tiling'
+	say '  DoelzaberiOS can start a Wayland desktop session (a tiling'
 	say '  compositor) with the alacritty terminal, instead of only the text'
 	say '  console.  You will start it after login with:  doelzaberi-gui'
 	say ''
@@ -751,19 +782,91 @@ ask_gui()
 	esac
 }
 
+ask_compositor()
+{
+	if [ "$WITH_GUI" = "no" ]; then
+		return 0
+	fi
+	if [ "$COMPOSITOR_GIVEN" = "yes" ]; then
+		return 0
+	fi
+	if [ "$WITH_GUI" = "ask" ]; then
+		return 0
+	fi
+	if [ ! -t 0 ]; then
+		note "stdin is not a terminal, the session will start $COMPOSITOR"
+		return 0
+	fi
+	say ''
+	rule
+	say 'Wayland session'
+	say ''
+	say '  Both compositors are part of this system.  The choice is written'
+	say '  into the installed system, and "doelzaberi-gui" then starts it'
+	say '  unless DOELZABERI_COMPOSITOR or --compositor says otherwise.'
+	say ''
+	say '    1  hyprland   dynamic tiling, the default'
+	say '    2  niri       scrollable tiling'
+	say ''
+	rule
+	printf 'Which compositor? [1] '
+	read -r _answer || _answer=
+	say ''
+	case "$_answer" in
+	2|n|N|niri|NIRI|Niri) COMPOSITOR=niri ;;
+	1|h|H|hyprland|HYPRLAND|Hyprland|'') COMPOSITOR=hyprland ;;
+	*) warn "'$_answer' is not one of the choices, using $COMPOSITOR" ;;
+	esac
+}
+
+
 gui_configs()
 {
 	_skel="$WORKDIR/root/etc/skel"
-	mkdir -p "$_skel/.config/niri" "$_skel/.config/alacritty" \
-		"$_skel/.config/ghostty" "$_skel/.config/noctalia" \
+	mkdir -p "$_skel/.config/niri" "$_skel/.config/hypr" \
+		"$_skel/.config/alacritty" "$_skel/.config/ghostty" \
+		"$_skel/.config/noctalia" \
 		"$_skel/.config/nautilus" || die 'cannot create the GUI config directories'
-	{
-		printf 'spawn-at-startup "alacritty"\n'
-		for _app in ghostty noctalia nautilus; do
-			[ -x "$WORKDIR/root/usr/bin/$_app" ] && printf 'spawn-at-startup "%s"\n' "$_app"
-		done
-		printf '\ninput {\n    keyboard {\n        xkb {\n            layout "us,ru"\n            options "grp:alt_shift_toggle"\n        }\n    }\n}\n'
-	} > "$_skel/.config/niri/config.kdl"
+	_starters=
+	for _app in alacritty ghostty noctalia nautilus; do
+		[ -x "$WORKDIR/root/usr/bin/$_app" ] || continue
+		_starters="$_starters $_app"
+	done
+	_niri="$_skel/.config/niri/config.kdl"
+	_hypr="$_skel/.config/hypr/hyprland.conf"
+	if [ ! -f "$_niri" ]; then
+		cat > "$_niri" <<'EOF'
+input {
+    keyboard {
+        xkb {
+            layout "us,ru"
+            options "grp:alt_shift_toggle"
+        }
+    }
+}
+EOF
+	fi
+	if [ ! -f "$_hypr" ]; then
+		cat > "$_hypr" <<'EOF'
+env = XDG_CURRENT_DESKTOP,Hyprland
+env = XDG_SESSION_TYPE,wayland
+monitor = ,preferred,auto,1
+
+input {
+    kb_layout = us,ru
+    kb_options = grp:alt_shift_toggle
+    follow_mouse = 1
+}
+
+$terminal = alacritty
+EOF
+	fi
+	for _app in $_starters; do
+		grep -q "spawn-at-startup \"$_app\"" "$_niri" ||
+			printf 'spawn-at-startup "%s"\n' "$_app" >> "$_niri"
+		grep -q "exec-once = $_app" "$_hypr" ||
+			printf 'exec-once = %s\n' "$_app" >> "$_hypr"
+	done
 	cat > "$_skel/.config/alacritty/alacritty.toml" <<EOF
 [font]
 size = 12
@@ -806,9 +909,10 @@ install_gui()
 	_workdir="$WORKDIR/gui"
 	mkdir -p "$_workdir" || die "cannot create $_workdir"
 	_failed=
-	for _pkg in niri alacritty ghostty noctalia nautilus; do
+	_compositor_bin=$(compositor_binary "$COMPOSITOR")
+	for _pkg in "$COMPOSITOR" alacritty ghostty noctalia nautilus; do
 		printf '       %s ... ' "$_pkg"
-		if [ -x "$WORKDIR/root/usr/bin/$_pkg" ]; then
+		if [ -x "$WORKDIR/root/usr/bin/$(compositor_binary "$_pkg")" ]; then
 			say 'included'
 			continue
 		fi
@@ -827,8 +931,29 @@ install_gui()
 	gui_configs
 	rm -rf "$WORKDIR/root/usr/share/doelzaberi/gui"
 	rm -rf "$_workdir"
+	if [ ! -x "$WORKDIR/root/usr/bin/$_compositor_bin" ]; then
+		warn "$_compositor_bin is not in the new system"
+		if [ -x "$WORKDIR/root/usr/bin/Hyprland" ]; then
+			COMPOSITOR=hyprland
+		elif [ -x "$WORKDIR/root/usr/bin/niri" ]; then
+			COMPOSITOR=niri
+		else
+			COMPOSITOR=
+		fi
+		_compositor_bin=$(compositor_binary "${COMPOSITOR:-niri}")
+		[ -n "$COMPOSITOR" ] &&
+			note "the session will start $COMPOSITOR instead"
+	fi
+	if [ -n "$COMPOSITOR" ]; then
+		mkdir -p "$WORKDIR/root$COMPOSITOR_DIR" ||
+			die "cannot create $WORKDIR/root$COMPOSITOR_DIR"
+		printf '%s\n' "$COMPOSITOR" > "$WORKDIR/root$COMPOSITOR_DIR/compositor" ||
+			die "cannot write $COMPOSITOR_DIR/compositor"
+		note "the session of the new system starts $COMPOSITOR"
+	fi
 	_gui_enabled=
-	if [ -x "$WORKDIR/root/usr/bin/niri" ] || [ -x "$WORKDIR/root/usr/bin/noctalia" ]; then
+	if [ -x "$WORKDIR/root/usr/bin/$_compositor_bin" ] ||
+		[ -x "$WORKDIR/root/usr/bin/noctalia" ]; then
 		_gui_enabled=yes
 	fi
 	if [ -n "$_gui_enabled" ]; then
@@ -1097,10 +1222,10 @@ create_account()
 	say ''
 	if [ "$WITH_GUI" = "yes" ]; then
 		say "  $USER_NAME is ready. Log in on the console: \"doas\" works for root,"
-		say '  "doelzaberi-gui" starts the niri Wayland session.'
+		say "  \"doelzaberi-gui\" starts the $COMPOSITOR Wayland session."
 	else
 		say "  $USER_NAME is ready. Log in on the console: \"doas\" works for root,"
-		say '  "doelzaberi-gui" also starts the niri Wayland session.'
+		say "  \"doelzaberi-gui\" also starts the $COMPOSITOR Wayland session."
 	fi
 }
 
@@ -1344,7 +1469,7 @@ print_plan()
 		say "  9. create the account $USER_NAME in the copy (uid >= 1000, home from /etc/skel)"
 	fi
 	if [ "$WITH_GUI" = "yes" ]; then
-		say ' 10. set up the graphical desktop (niri Wayland session, alacritty terminal)'
+		say " 10. set up the graphical desktop ($COMPOSITOR Wayland session, alacritty terminal)"
 	fi
 	rule
 }
@@ -1404,6 +1529,7 @@ main()
 	ask_account
 	ask_root_size
 	ask_gui
+	ask_compositor
 	confirm_device
 
 	if [ "$DRY_RUN" = "yes" ]; then

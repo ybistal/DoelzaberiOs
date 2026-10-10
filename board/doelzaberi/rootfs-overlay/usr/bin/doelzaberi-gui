@@ -3,14 +3,29 @@
 set -u
 
 PROG=${0##*/}
-if [ -n "${DOELZABERI_COMPOSITOR:-}" ]; then
-	COMPOSITOR=$DOELZABERI_COMPOSITOR
-elif command -v Hyprland >/dev/null 2>&1; then
-	COMPOSITOR=Hyprland
-elif command -v niri >/dev/null 2>&1; then
-	COMPOSITOR=niri
-else
-	COMPOSITOR=weston
+COMPOSITOR=${DOELZABERI_COMPOSITOR:-}
+COMPOSITOR_FILE=/etc/doelzaberi/compositor
+if [ -z "$COMPOSITOR" ] && [ -r "$COMPOSITOR_FILE" ]; then
+	COMPOSITOR=$(head -n 1 "$COMPOSITOR_FILE" 2>/dev/null | tr -d ' \t\r\n')
+fi
+case "$COMPOSITOR" in
+hyprland|Hyprland|HYPRLAND) COMPOSITOR=Hyprland ;;
+niri|NIRI|Niri) COMPOSITOR=niri ;;
+weston|WESTON|Weston) COMPOSITOR=weston ;;
+cage|CAGE|Cage) COMPOSITOR=cage ;;
+esac
+if [ -n "$COMPOSITOR" ] && ! command -v "$COMPOSITOR" >/dev/null 2>&1; then
+	printf '%s: warning: %s is not installed\n' "$PROG" "$COMPOSITOR" >&2
+	COMPOSITOR=
+fi
+if [ -z "$COMPOSITOR" ]; then
+	if command -v Hyprland >/dev/null 2>&1; then
+		COMPOSITOR=Hyprland
+	elif command -v niri >/dev/null 2>&1; then
+		COMPOSITOR=niri
+	else
+		COMPOSITOR=weston
+	fi
 fi
 PIXMAN=no
 CLIENT=
@@ -24,8 +39,9 @@ Usage:
   $PROG [options] [command [arguments]]
 
 Options:
-      --compositor=NAME   compositor to run (default: Hyprland when installed,
-                          otherwise niri, then $COMPOSITOR)
+      --compositor=NAME   compositor to run (default: $COMPOSITOR, from
+                          DOELZABERI_COMPOSITOR, $COMPOSITOR_FILE,
+                          otherwise the first of Hyprland, niri, weston)
   -p, --pixman            ask weston for the software renderer
   -h, --help              this help
 

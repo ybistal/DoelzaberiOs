@@ -36,15 +36,23 @@ for _bundle in "$BOARD_DIR/gui"/*.tar.gz; do
 	cp -f "$_bundle" "$TARGET_DIR/usr/share/doelzaberi/gui/"
 done
 
-cat > "$TARGET_DIR/usr/lib/os-release" <<'EOF'
-NAME="DoelzaberiOS"
-ID=doelzaberi
-ID_LIKE=buildroot
-PRETTY_NAME="DoelzaberiOS 1.0"
-VERSION="1.0"
-VERSION_ID="1.0"
-ANSI_COLOR="1;36"
-EOF
+_libc=musl
+if [ -n "${BR2_CONFIG:-}" ] && [ -f "$BR2_CONFIG" ] &&
+	grep -q '^BR2_TOOLCHAIN_BUILDROOT_GLIBC=y' "$BR2_CONFIG"
+then
+	_libc=glibc
+fi
+
+{
+	printf 'NAME="DoelzaberiOS"\n'
+	printf 'ID=doelzaberi\n'
+	printf 'ID_LIKE=buildroot\n'
+	printf 'PRETTY_NAME="DoelzaberiOS 1.0 (%s)"\n' "$_libc"
+	printf 'VERSION="1.0"\n'
+	printf 'VERSION_ID="1.0"\n'
+	printf 'VERSION_CODENAME="%s"\n' "$_libc"
+	printf 'ANSI_COLOR="1;36"\n'
+} > "$TARGET_DIR/usr/lib/os-release"
 if [ -n "${DOELZABERI_HOME_URL:-}" ]; then
 	printf 'HOME_URL="%s"\n' "$DOELZABERI_HOME_URL" >> "$TARGET_DIR/usr/lib/os-release"
 fi
